@@ -107,9 +107,10 @@ export async function scanDemoProduct(productId: string): Promise<any> {
   };
 }
 
-export async function scanUploadedImage(file: File): Promise<any> {
+export async function scanUploadedImages(files: File[]): Promise<any> {
   const formData = new FormData();
-  formData.append('file', file);
+  // Always use 'files' key — backend expects List[UploadFile] named 'files'
+  files.forEach((f) => formData.append('files', f));
 
   const res = await fetch(`${API_BASE}/api/scan`, {
     method: 'POST',
@@ -117,10 +118,17 @@ export async function scanUploadedImage(file: File): Promise<any> {
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Failed to scan image. Ensure Python backend is running at ' + API_BASE }));
+    const err = await res.json().catch(() => ({
+      detail: 'Failed to scan image(s). Ensure Python backend is running at ' + API_BASE,
+    }));
     throw new Error(err.detail || 'Scanning failed');
   }
   return await res.json();
+}
+
+// Backward-compatible alias for single file
+export async function scanUploadedImage(file: File): Promise<any> {
+  return scanUploadedImages([file]);
 }
 
 export async function clearAllInspections(): Promise<{ status: string; message: string }> {

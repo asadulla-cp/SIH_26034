@@ -279,11 +279,16 @@ class RuleEngine:
     def _validate_conditional(self, result: dict, value: Any, confidence: float, rule: dict, extracted: dict):
         """Conditional validation."""
         if value and str(value).strip().lower() not in ("", "none", "missing", "not detected", "n/a"):
-            result["status"] = "PASS"
-            result["reason"] = f"Declaration detected: '{value}'"
+            if confidence > 0 and confidence < CONFIDENCE_REVIEW_THRESHOLD:
+                result["status"] = "NEEDS_REVIEW"
+                result["reason"] = f"Conditionally required field detected with low confidence ({confidence:.0%})."
+            else:
+                result["status"] = "PASS"
+                result["reason"] = f"Declaration detected: '{value}'"
         else:
-            result["status"] = "PASS"
-            result["reason"] = f"Declaration optional or conditionally applicable."
+            result["status"] = "NEEDS_REVIEW"
+            result["reason"] = f"Declaration not detected. This field may be conditionally required. Manual review needed."
+            result["evidence_type"] = "not_detected"
 
 
 # Singleton instance

@@ -1,6 +1,7 @@
 """
-MetaLex Backend — FastAPI Application
+MetaLex Backend — FastAPI Application v2
 Main API server for the Legal Metrology compliance checking system.
+Supports multi-image scanning (1-5 images per inspection).
 """
 import os
 import sys
@@ -12,8 +13,11 @@ import logging
 import datetime
 import traceback
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import cv2
 import numpy as np
@@ -33,12 +37,29 @@ from backend.models.db_models import (
     Inspection, ExtractedField, Violation, ReviewAction, RuleRecord
 )
 from backend.services.ocr_pipeline import (
-    process_image, is_ocr_available, extract_fields, assess_image_quality,
-    run_ocr, preprocess_image, create_annotated_image, _empty_fields
+    process_multiple_images,
+    process_single_image,
+    process_image,
+    is_ocr_available,
+    extract_fields,
+    assess_image_quality,
+    run_ocr,
+    create_annotated_image,
+    _empty_fields
 )
 from backend.services.demo_service import get_demo_products, get_demo_product
 from backend.services.report_service import generate_report
 from rules.rule_engine import get_rule_engine
+
+# Gemini pipeline — optional, activated by GEMINI_API_KEY env var
+_gemini_pipeline = None
+if os.environ.get("GEMINI_API_KEY") and os.environ.get("GEMINI_API_KEY") != "your_gemini_api_key_here":
+    try:
+        from backend.services.gemini_pipeline import process_with_gemini
+        _gemini_pipeline = process_with_gemini
+        logging.getLogger("metalex").info("✅ Gemini 3.6 Flash pipeline activated.")
+    except Exception as _ge:
+        logging.getLogger("metalex").warning(f"Gemini pipeline failed to load: {_ge}")
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -79,9 +100,8 @@ FIELD_LABELS = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup/shutdown."""
-    logger.info("🚀 MetaLex starting up...")
+    logger.info("🚀 MetaLex v2 starting up...")
     init_db()
-    # Pre-load rule engine (instant)
     get_rule_engine()
     logger.info("✅ Database & Rule Engine initialized")
     yield
@@ -90,8 +110,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MetaLex API",
-    description="Legal Metrology Compliance Checking System",
-    version="1.0.0",
+    description="Legal Metrology Compliance Checking System — Multi-Image Edition",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -111,108 +131,112 @@ async def health():
     return {
         "status": "healthy",
         "ocr_available": is_ocr_available(),
+        "version": "2.0.0",
+        "multi_image_support": True,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
 
-# ────────────────────────────────── Scan ──────────────────────────────────────
+# ────────────────────────────────── Multi-Image Scan ──────────────────────────
 @app.post("/api/scan")
-async def scan_product(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def scan_product(
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db)
+):
     """
-    Full scan pipeline:
-    1. Validate & save uploaded image
-    2. Run OCR + field extraction
-    3. Apply rule engine
-    4. Store results
-    5. Return compliance assessment
+    Multi-image Legal Metrology Scan (1 to 5 package angle photos).
+    Pass 1 to 5 images using the 'files' field (multipart form).
+    Fuses declarations across Front, Back, Bottom/MRP panel, and side views.
+    Detects conflicts (e.g., ₹199 vs ₹299) and flags them as NEEDS REVIEW.
     """
     try:
-        # Validate file
-        if not file.filename:
-            raise HTTPException(400, "No filename provided")
+        # Normalize files list
+        upload_list: List[UploadFile] = list(files) if files else []
 
-        ext = Path(file.filename).suffix.lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(400, f"Unsupported file type: {ext}. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
+        if not upload_list:
+            raise HTTPException(400, "No image files provided. Please upload 1 to 5 package images.")
 
-        # Read file content
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_SIZE:
-            raise HTTPException(400, f"File too large. Max: {MAX_UPLOAD_SIZE // (1024*1024)}MB")
+        if len(upload_list) > 5:
+            upload_list = upload_list[:5]  # Max 5 package pictures
 
-        if len(content) < 100:
-            raise HTTPException(400, "File appears to be empty or corrupted")
-
-        # Save upload
         inspection_id = generate_inspection_id()
-        filename = f"{inspection_id}{ext}"
-        image_path = str(UPLOAD_DIR / filename)
+        saved_image_paths: List[str] = []
+        saved_annotated_paths: List[str] = []
 
-        with open(image_path, "wb") as f:
-            f.write(content)
+        # ── Validate and save all uploaded images ────────────────────────────
+        for idx, up_file in enumerate(upload_list):
+            fname = up_file.filename or f"image_{idx}.jpg"
+            ext = Path(fname).suffix.lower() or ".jpg"
+            if ext not in ALLOWED_EXTENSIONS:
+                ext = ".jpg"
 
-        # Process image
+            content = await up_file.read()
+            if len(content) < 100:
+                logger.warning(f"Skipping empty/invalid upload: {fname}")
+                continue
+            if len(content) > MAX_UPLOAD_SIZE:
+                raise HTTPException(400, f"File {fname} exceeds {MAX_UPLOAD_SIZE // (1024 * 1024)}MB limit.")
+
+            img_filename = f"{inspection_id}_{idx}{ext}"
+            img_path = str(UPLOAD_DIR / img_filename)
+            with open(img_path, "wb") as f:
+                f.write(content)
+            saved_image_paths.append(img_path)
+
+        if not saved_image_paths:
+            raise HTTPException(400, "No valid package images could be processed.")
+
+        # ── Run multi-image extraction (Gemini if available, else EasyOCR) ────
         start_time = time.time()
-
-        if is_ocr_available():
-            result = process_image(image_path)
+        if _gemini_pipeline:
+            logger.info("Using Gemini 2.5 Flash for field extraction.")
+            multi_result = _gemini_pipeline(saved_image_paths)
         else:
-            # Fallback: still try to load and assess the image
-            try:
-                img = cv2.imread(image_path)
-                if img is None:
-                    pil_img = Image.open(image_path).convert("RGB")
-                    img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-                quality = assess_image_quality(img)
-                result = {
-                    "success": True,
-                    "quality": quality,
-                    "ocr_results": [],
-                    "fields": _empty_fields(),
-                    "annotated_image": img,
-                    "original_image": img,
-                    "processing_time_ms": 0,
-                    "ocr_engine": "fallback_demo",
-                }
-            except Exception:
-                result = {
-                    "success": False,
-                    "error": "Cannot process image and OCR is not available",
-                    "quality": {"overall_score": 0, "issues": ["Image processing failed"]},
-                    "ocr_results": [],
-                    "fields": _empty_fields(),
-                    "processing_time_ms": 0,
-                }
+            logger.info("Using EasyOCR pipeline (set GEMINI_API_KEY to enable Gemini).")
+            multi_result = process_multiple_images(saved_image_paths)
 
-        if not result["success"]:
-            raise HTTPException(422, result.get("error", "Image processing failed"))
+        # ── Save annotated image for each angle ──────────────────────────────
+        for idx, p_res in enumerate(multi_result.get("per_image_results", [])):
+            ann_img = p_res.get("annotated_image")
+            if ann_img is not None:
+                ann_name = f"{inspection_id}_{idx}_annotated.jpg"
+                ann_path = str(ANNOTATED_DIR / ann_name)
+                cv2.imwrite(ann_path, ann_img)
+                saved_annotated_paths.append(ann_path)
 
         processing_time = int((time.time() - start_time) * 1000)
-        fields = result["fields"]
+        fused_fields = multi_result.get("fields", {})
 
-        # Save annotated image
-        annotated_path = None
-        if "annotated_image" in result and result["annotated_image"] is not None:
-            annotated_filename = f"{inspection_id}_annotated.jpg"
-            annotated_path = str(ANNOTATED_DIR / annotated_filename)
-            cv2.imwrite(annotated_path, result["annotated_image"])
+        # ── Apply conflict-awareness: if field has conflict, mark as needs_review ─
+        # The rule engine receives the fused fields — conflict fields will be NEEDS_REVIEW
+        fields_for_engine = {}
+        for fname, fdata in fused_fields.items():
+            entry = dict(fdata)
+            # If conflict detected, degrade confidence so rule engine sees uncertainty
+            if fdata.get("conflict_detected") and fdata.get("value"):
+                entry["confidence"] = min(entry.get("confidence", 0), 0.45)
+                entry["extraction_method"] = "conflict_detected"
+            fields_for_engine[fname] = entry
 
-        # Run rule engine
+        # ── Run Deterministic Legal Rule Engine on merged declarations ─────────
         engine = get_rule_engine()
-        validation = engine.validate_all(fields)
+        validation = engine.validate_all(fields_for_engine)
 
-        # Determine product name
+        # ── Determine product name ─────────────────────────────────────────────
         product_name = "Unknown Product"
-        pn = fields.get("product_name", {})
+        pn = fused_fields.get("product_name", {})
         if pn.get("value"):
             product_name = pn["value"]
 
-        # Save to database
+        # ── Save inspection to DB ──────────────────────────────────────────────
+        primary_image = saved_image_paths[0] if saved_image_paths else None
+        primary_annotated = saved_annotated_paths[0] if saved_annotated_paths else None
+
         inspection = Inspection(
             inspection_id=inspection_id,
             product_name=product_name,
-            image_path=image_path,
-            annotated_image_path=annotated_path,
+            image_path=primary_image,
+            annotated_image_path=primary_annotated,
             overall_status=validation["overall_status"],
             compliance_score=validation["compliance_score"],
             total_fields=validation["total_checks"],
@@ -220,17 +244,22 @@ async def scan_product(file: UploadFile = File(...), db: Session = Depends(get_d
             failed_fields=validation["failed"],
             review_fields=validation["needs_review"],
             is_demo=False,
-            image_quality_score=result["quality"]["overall_score"],
-            image_quality_issues=result["quality"]["issues"],
-            ocr_engine=result.get("ocr_engine", "easyocr"),
+            image_quality_score=multi_result.get("quality", {}).get("overall_score", 0.9),
+            image_quality_issues=multi_result.get("quality", {}).get("issues", []),
+            ocr_engine=multi_result.get("ocr_engine", "easyocr_multipass_v2"),
             processing_time_ms=processing_time,
         )
         db.add(inspection)
         db.flush()
 
-        # Save extracted fields
+        # ── Save extracted fields ──────────────────────────────────────────────
         extracted_list = []
-        for field_name, field_data in fields.items():
+        for field_name, field_data in fused_fields.items():
+            # Include conflict info in candidates
+            candidates = field_data.get("candidates", [])
+            if field_data.get("all_image_candidates"):
+                candidates = field_data["all_image_candidates"]
+
             ef = ExtractedField(
                 inspection_id=inspection.id,
                 field_name=field_name,
@@ -242,22 +271,31 @@ async def scan_product(file: UploadFile = File(...), db: Session = Depends(get_d
                 bounding_box=field_data.get("bounding_box"),
                 source_text=field_data.get("source_text", ""),
                 extraction_method=field_data.get("extraction_method", "ocr"),
-                candidates=field_data.get("candidates"),
+                candidates=candidates,
             )
             db.add(ef)
             extracted_list.append(ef)
 
-        # Update field statuses from validation
+        # ── Update field statuses from rule engine validation ──────────────────
         for vr in validation["results"]:
             for ef in extracted_list:
                 if ef.field_name == vr["field"]:
-                    # Use the most severe status
-                    if ef.status == "PENDING" or vr["status"] == "FAIL" or (vr["status"] == "NEEDS_REVIEW" and ef.status != "FAIL"):
+                    if (ef.status == "PENDING" or
+                            vr["status"] == "FAIL" or
+                            (vr["status"] == "NEEDS_REVIEW" and ef.status != "FAIL")):
                         ef.status = vr["status"]
 
-        # Save violations
+        # Conflict fields that aren't already FAIL → NEEDS_REVIEW
+        for field_name, fdata in fused_fields.items():
+            if fdata.get("conflict_detected"):
+                for ef in extracted_list:
+                    if ef.field_name == field_name and ef.status not in ("FAIL",):
+                        ef.status = "NEEDS_REVIEW"
+
+        # ── Save violations ────────────────────────────────────────────────────
         violation_list = []
-        for v in validation["violations"] + validation["reviews"]:
+        all_issues = validation.get("violations", []) + validation.get("reviews", [])
+        for v in all_issues:
             if v["status"] == "PASS":
                 continue
             viol = Violation(
@@ -280,18 +318,109 @@ async def scan_product(file: UploadFile = File(...), db: Session = Depends(get_d
 
         db.commit()
 
-        # Build response
-        response = _build_inspection_response(
-            inspection, extracted_list, violation_list,
-            validation, result, annotated_path
-        )
+        # ── Build per-image metadata for UI ───────────────────────────────────
+        per_image_meta = []
+        for p_res in multi_result.get("per_image_results", []):
+            # Support both Gemini pipeline (fields_found=[...]) and EasyOCR (fields={...})
+            raw_fields_found = p_res.get("fields_found")
+            if isinstance(raw_fields_found, list):
+                fields_found_list = raw_fields_found
+            elif isinstance(p_res.get("fields"), dict):
+                fields_found_list = [
+                    fname for fname, fd in p_res["fields"].items()
+                    if fd.get("value")
+                ]
+            else:
+                fields_found_list = []
+
+            per_image_meta.append({
+                "image_index": p_res.get("image_index", 0),
+                "image_number": p_res.get("image_number", 1),
+                "success": p_res.get("success", True),
+                "error": p_res.get("error"),
+                "quality": p_res.get("quality", {}),
+                "ocr_text_count": p_res.get("ocr_text_count", 0),
+                "fields_found": fields_found_list,
+            })
+
+        # ── Build response ────────────────────────────────────────────────────
+        # Rebuild fields with conflict info for the response
+        fields_response = []
+        for ef in extracted_list:
+            fdata = fused_fields.get(ef.field_name, {})
+            field_entry = {
+                "field_name": ef.field_name,
+                "field_label": ef.field_label,
+                "detected_value": ef.detected_value,
+                "normalized_value": ef.normalized_value,
+                "confidence": ef.confidence,
+                "status": ef.status,
+                "bounding_box": ef.bounding_box,
+                "source_text": ef.source_text,
+                "extraction_method": ef.extraction_method,
+                "candidates": ef.candidates,
+                # Multi-image specific
+                "conflict_detected": fdata.get("conflict_detected", False),
+                "source_image_index": fdata.get("source_image_index"),
+                "source_image_number": fdata.get("source_image_number"),
+                "all_image_candidates": fdata.get("all_image_candidates", []),
+            }
+            fields_response.append(field_entry)
+
+        response = {
+            "id": inspection.id,
+            "inspection_id": inspection.inspection_id,
+            "product_name": inspection.product_name,
+            "overall_status": validation["overall_status"],
+            "compliance_score": validation["compliance_score"],
+            "total_checks": validation["total_checks"],
+            "passed": validation["passed"],
+            "failed": validation["failed"],
+            "needs_review": validation["needs_review"],
+            "is_demo": False,
+            # Multi-image metadata — safe fallbacks for both Gemini and EasyOCR pipelines
+            "total_images": multi_result.get("total_images", len(saved_image_paths)),
+            "successful_images": multi_result.get("successful_images", len(saved_image_paths)),
+            "per_image_results": per_image_meta,
+            "has_conflicts": multi_result.get("has_conflicts", False),
+            "conflict_fields": multi_result.get("conflict_fields", []),
+            # Quality
+            "image_quality": multi_result.get("quality", {"overall_score": 0.9, "quality_label": "Good", "issues": []}),
+            "processing_time_ms": processing_time,
+            "ocr_engine": multi_result.get("ocr_engine", "easyocr_multipass_v2"),
+            "has_image": bool(primary_image),
+            "has_annotated_image": bool(primary_annotated),
+            "created_at": inspection.created_at.isoformat() if inspection.created_at else None,
+            "rule_set_version": validation.get("rule_set_version"),
+            "disclaimer": validation.get("disclaimer"),
+            "fields": fields_response,
+            "violations": [
+                {
+                    "rule_id": v.rule_id,
+                    "field": v.field,
+                    "severity": v.severity,
+                    "title": v.title,
+                    "detected_value": v.detected_value,
+                    "expected_requirement": v.expected_requirement,
+                    "reason": v.reason,
+                    "confidence": v.confidence,
+                    "evidence_type": v.evidence_type,
+                    "bounding_box": v.bounding_box,
+                    "rule_version": v.rule_version,
+                    "is_prototype_rule": v.is_prototype_rule,
+                }
+                for v in violation_list
+            ],
+            "validation_results": validation["results"],
+        }
+
         return JSONResponse(content=response)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Scan failed: {e}\n{traceback.format_exc()}")
-        raise HTTPException(500, "An error occurred while processing the image. Please try again.")
+        raise HTTPException(500, f"An error occurred while processing the image: {str(e)}")
 
 
 # ────────────────────────────────── Demo Scan ─────────────────────────────────
@@ -312,7 +441,6 @@ async def scan_demo_product(product_id: str, db: Session = Depends(get_db)):
 
         product_name = demo["name"]
 
-        # Save to database
         inspection = Inspection(
             inspection_id=inspection_id,
             product_name=product_name,
@@ -351,15 +479,16 @@ async def scan_demo_product(product_id: str, db: Session = Depends(get_db)):
             db.add(ef)
             extracted_list.append(ef)
 
-        # Update field statuses
         for vr in validation["results"]:
             for ef in extracted_list:
                 if ef.field_name == vr["field"]:
-                    if ef.status == "PENDING" or vr["status"] == "FAIL" or (vr["status"] == "NEEDS_REVIEW" and ef.status != "FAIL"):
+                    if (ef.status == "PENDING" or
+                            vr["status"] == "FAIL" or
+                            (vr["status"] == "NEEDS_REVIEW" and ef.status != "FAIL")):
                         ef.status = vr["status"]
 
         violation_list = []
-        for v in validation["violations"] + validation["reviews"]:
+        for v in validation.get("violations", []) + validation.get("reviews", []):
             if v["status"] == "PASS":
                 continue
             viol = Violation(
@@ -383,11 +512,14 @@ async def scan_demo_product(product_id: str, db: Session = Depends(get_db)):
         db.commit()
 
         response = _build_inspection_response(
-            inspection, extracted_list, violation_list,
-            validation, None, None
+            inspection, extracted_list, violation_list, validation, None, None
         )
         response["is_demo"] = True
         response["demo_description"] = demo["description"]
+        response["total_images"] = 1
+        response["successful_images"] = 1
+        response["per_image_results"] = []
+        response["has_conflicts"] = False
         return JSONResponse(content=response)
 
     except HTTPException:
@@ -620,7 +752,6 @@ async def submit_review(inspection_id: str, review_data: dict, db: Session = Dep
         )
         db.add(action)
 
-        # Update extracted field if edited
         if review_data.get("corrected_value") and review_data.get("field_name"):
             ef = db.query(ExtractedField).filter(
                 ExtractedField.inspection_id == inspection.id,
@@ -739,19 +870,16 @@ async def dashboard_stats(db: Session = Depends(get_db)):
         non_compliant = db.query(Inspection).filter(Inspection.overall_status == "NON_COMPLIANT").count()
         needs_review = db.query(Inspection).filter(Inspection.overall_status == "NEEDS_REVIEW").count()
 
-        # Recent inspections
         recent = db.query(Inspection).order_by(Inspection.created_at.desc()).limit(10).all()
 
-        # Common violations
         all_violations = db.query(Violation).all()
-        violation_counts: dict[str, int] = {}
+        violation_counts: dict = {}
         for v in all_violations:
             key = v.field
             violation_counts[key] = violation_counts.get(key, 0) + 1
 
         common_violations = sorted(violation_counts.items(), key=lambda x: x[1], reverse=True)[:10]
 
-        # Recent high-severity violations
         high_violations = db.query(Violation).filter(
             Violation.severity == "high"
         ).order_by(Violation.created_at.desc()).limit(5).all()
@@ -839,6 +967,10 @@ def _build_inspection_response(
                 "source_text": ef.source_text,
                 "extraction_method": ef.extraction_method,
                 "candidates": ef.candidates,
+                "conflict_detected": False,
+                "source_image_index": None,
+                "source_image_number": None,
+                "all_image_candidates": [],
             }
             for ef in extracted_list
         ],

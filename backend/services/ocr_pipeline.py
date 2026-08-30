@@ -1,29 +1,29 @@
 """
-MetaLex OCR/Vision Pipeline
-IMAGE → PREPROCESS → OCR → EXTRACT → CLASSIFY → VALIDATE
+MetaLex Advanced OCR/Vision Pipeline v3
+FIELD-AWARE SPATIAL REASONING MODEL
 
-This module handles:
-1. Image quality assessment
-2. Image preprocessing (perspective, contrast, noise)
-3. OCR with bounding boxes and confidence
-4. Text normalization
-5. Field classification using regex + keyword matching
-6. Confidence scoring
+Key improvements:
+1. Replaced generic regex with Field-Aware Spatial Extraction.
+2. OCR Bounding Boxes are preserved and used for geometric reasoning.
+3. Dedicated Detectors (MRP, Date, Qty) enforce layout rules (e.g., MRP value must be near MRP label).
+4. Nutrition Table Masking prevents irrelevant numbers from contaminating candidate pools.
+5. Multi-pass OCR remains, but heavily filters candidates based on legal context.
+6. Validation explicitly rejects "0" for MRP and enforces sensible formatting.
 """
 import re
 import cv2
 import numpy as np
 from PIL import Image
-from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any, Tuple
 import logging
-import io
+import time
 
 logger = logging.getLogger("metalex.ocr")
 
-# Try to import EasyOCR
+# EasyOCR reader cache
 _easyocr_reader = None
 _ocr_available = False
+
 
 def _get_ocr_reader():
     global _easyocr_reader, _ocr_available
@@ -31,94 +31,70 @@ def _get_ocr_reader():
         return _easyocr_reader
     try:
         import ssl
-        import urllib.request
-        # Allow downloading models on macOS without pre-installed root certificates
         try:
-            _create_unverified_https_context = ssl._create_unverified_context
+            ssl._create_default_https_context = ssl._create_unverified_context
         except AttributeError:
             pass
-        else:
-            ssl._create_default_https_context = _create_unverified_https_context
-
         import easyocr
         _easyocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
         _ocr_available = True
         logger.info("EasyOCR initialized successfully")
         return _easyocr_reader
     except Exception as e:
-        logger.warning(f"EasyOCR unavailable: {e}. Demo mode will be used.")
+        logger.warning(f"EasyOCR initialization warning: {e}. Fallback pipeline active.")
         _ocr_available = False
         return None
-
 
 def is_ocr_available() -> bool:
     global _ocr_available
     _get_ocr_reader()
     return _ocr_available
 
-
-# ──────────────────────────── Image Quality Assessment ────────────────────────
+# ──────────────────────────── Quality Assessment ──────────────────────────────
 def assess_image_quality(img: np.ndarray) -> dict:
-    """Assess image quality for OCR suitability."""
+    """Assess image quality for Legal Metrology OCR suitability."""
     issues = []
     scores = {}
-
     h, w = img.shape[:2]
 
-    # Resolution check
     resolution = h * w
-    if resolution < 100 * 100:
-        issues.append("Extremely low resolution — OCR results may be unreliable")
+    if resolution < 120 * 120:
+        issues.append("Extremely low resolution — text unreadable")
         scores["resolution"] = 0.2
-    elif resolution < 300 * 300:
-        issues.append("Low resolution — OCR accuracy may be reduced")
-        scores["resolution"] = 0.5
-    elif resolution < 640 * 480:
-        scores["resolution"] = 0.7
+    elif resolution < 400 * 400:
+        issues.append("Low resolution — minor text may be missed")
+        scores["resolution"] = 0.6
     else:
         scores["resolution"] = 1.0
 
-    # Blur detection (Laplacian variance)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
     laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-    if laplacian_var < 20:
-        issues.append("Image appears very blurry — text may be unreadable")
-        scores["sharpness"] = 0.2
-    elif laplacian_var < 80:
-        issues.append("Image appears somewhat blurry")
-        scores["sharpness"] = 0.5
-    elif laplacian_var < 200:
+    if laplacian_var < 25:
+        issues.append("Image is blurry — please hold camera steady")
+        scores["sharpness"] = 0.3
+    elif laplacian_var < 90:
+        issues.append("Slightly blurry — consider retaking")
         scores["sharpness"] = 0.7
     else:
         scores["sharpness"] = 1.0
 
-    # Contrast check
-    if len(img.shape) == 3:
-        gray_for_contrast = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    else:
-        gray_for_contrast = gray
-    contrast = gray_for_contrast.std()
-    if contrast < 20:
-        issues.append("Very low contrast — text may blend with background")
-        scores["contrast"] = 0.3
-    elif contrast < 40:
-        issues.append("Low contrast detected")
-        scores["contrast"] = 0.6
+    contrast = gray.std()
+    if contrast < 22:
+        issues.append("Low contrast between packaging text and background")
+        scores["contrast"] = 0.4
     else:
         scores["contrast"] = 1.0
 
-    # Brightness check
-    brightness = gray_for_contrast.mean()
-    if brightness < 40:
-        issues.append("Image is very dark")
+    brightness = gray.mean()
+    if brightness < 35:
+        issues.append("Image is too dark — improve lighting")
         scores["brightness"] = 0.4
-    elif brightness > 220:
-        issues.append("Image is overexposed")
-        scores["brightness"] = 0.4
+    elif brightness > 230:
+        issues.append("Image has glare or overexposure")
+        scores["brightness"] = 0.5
     else:
         scores["brightness"] = 1.0
 
-    # Overall quality score
     overall = sum(scores.values()) / len(scores) if scores else 0.5
 
     return {
@@ -126,238 +102,491 @@ def assess_image_quality(img: np.ndarray) -> dict:
         "scores": scores,
         "issues": issues,
         "resolution": f"{w}x{h}",
-        "is_suitable": overall >= 0.5,
+        "is_suitable": overall >= 0.4,
+        "quality_label": "Good" if overall >= 0.75 else ("Fair" if overall >= 0.5 else "Poor"),
     }
 
-
-# ──────────────────────────── Image Preprocessing ─────────────────────────────
-def preprocess_image(img: np.ndarray) -> np.ndarray:
-    """
-    Preprocess image for better OCR:
-    1. Resize if too small
-    2. Denoise
-    3. Contrast enhancement (CLAHE)
-    4. Optional perspective correction
-    """
+# ──────────────────────────── Multi-Pass Preprocessing ────────────────────────
+def preprocess_for_ocr(img: np.ndarray) -> List[np.ndarray]:
+    """Produce multi-pass preprocessed variants."""
     h, w = img.shape[:2]
+    variants = []
 
-    # Upscale small images
-    if max(h, w) < 800:
-        scale = 800 / max(h, w)
-        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    scaled = img.copy()
+    if max(h, w) < 900:
+        factor = 900 / max(h, w)
+        scaled = cv2.resize(scaled, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+    elif max(h, w) > 3000:
+        factor = 3000 / max(h, w)
+        scaled = cv2.resize(scaled, None, fx=factor, fy=factor, interpolation=cv2.INTER_AREA)
 
-    # Limit oversized images
-    if max(h, w) > 4000:
-        scale = 4000 / max(h, w)
-        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    # 1. Base CLAHE
+    try:
+        denoised = cv2.fastNlMeansDenoisingColored(scaled, None, 8, 8, 7, 21)
+        lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        cl = clahe.apply(l)
+        enhanced = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2BGR)
+        variants.append(enhanced)
+    except Exception:
+        variants.append(scaled)
 
-    # Denoise
-    img = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
+    # 2. High-contrast Grayscale (Adaptive Threshold for stamped text)
+    try:
+        gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
+        clahe2 = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        gray_clahe = clahe2.apply(gray)
+        thresh = cv2.adaptiveThreshold(gray_clahe, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                        cv2.THRESH_BINARY, 15, 8)
+        variants.append(cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR))
+    except Exception:
+        pass
 
-    # CLAHE contrast enhancement
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l_channel = lab[:, :, 0]
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    lab[:, :, 0] = clahe.apply(l_channel)
-    img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    # 3. Sharpened
+    try:
+        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+        sharp = cv2.filter2D(scaled, -1, kernel)
+        variants.append(sharp)
+    except Exception:
+        pass
 
-    return img
-
+    return variants if variants else [img]
 
 # ──────────────────────────── OCR Execution ───────────────────────────────────
-def run_ocr(img: np.ndarray) -> list[dict]:
-    """
-    Run OCR on image. Returns list of detected text regions with bounding boxes.
-
-    Each result: {
-        "text": str,
-        "confidence": float (0-1),
-        "bbox": [[x1,y1], [x2,y2], [x3,y3], [x4,y4]],
-        "bbox_rect": [x_min, y_min, x_max, y_max],
-    }
-    """
+def run_ocr(img: np.ndarray) -> list:
+    """Run multi-pass OCR on image with bounding box tracking and duplicate removal."""
     reader = _get_ocr_reader()
     if reader is None:
         return []
 
-    try:
-        results = reader.readtext(img)
-        parsed = []
-        for (bbox, text, conf) in results:
-            # Convert polygon to rectangle
-            pts = np.array(bbox)
-            x_min, y_min = pts.min(axis=0).astype(int).tolist()
-            x_max, y_max = pts.max(axis=0).astype(int).tolist()
+    variants = preprocess_for_ocr(img)
+    collected_results = []
+    seen_texts: set = set()
 
-            parsed.append({
-                "text": text.strip(),
-                "confidence": round(float(conf), 3),
-                "bbox": [[int(p[0]), int(p[1])] for p in bbox],
-                "bbox_rect": [x_min, y_min, x_max, y_max],
-            })
-        return parsed
-    except Exception as e:
-        logger.error(f"OCR failed: {e}")
+    for var in variants:
+        try:
+            raw_results = reader.readtext(var, paragraph=False, width_ths=0.7)
+            for (bbox, text, conf) in raw_results:
+                clean_text = text.strip()
+                if len(clean_text) < 2:
+                    continue
+
+                pts = np.array(bbox)
+                vh, vw = var.shape[:2]
+                oh, ow = img.shape[:2]
+                scale_x = ow / vw
+                scale_y = oh / vh
+
+                x_min = int(pts[:, 0].min() * scale_x)
+                y_min = int(pts[:, 1].min() * scale_y)
+                x_max = int(pts[:, 0].max() * scale_x)
+                y_max = int(pts[:, 1].max() * scale_y)
+
+                key = (clean_text.lower(), round(x_min / 50), round(y_min / 50))
+                if key not in seen_texts:
+                    seen_texts.add(key)
+                    collected_results.append({
+                        "text": clean_text,
+                        "confidence": round(float(conf), 3),
+                        "bbox": [[int(p[0] * scale_x), int(p[1] * scale_y)] for p in bbox],
+                        "bbox_rect": [max(0, x_min), max(0, y_min), min(ow, x_max), min(oh, y_max)],
+                        "center_x": (x_min + x_max) / 2,
+                        "center_y": (y_min + y_max) / 2,
+                        "width": max(1, x_max - x_min),
+                        "height": max(1, y_max - y_min),
+                    })
+        except Exception as e:
+            logger.warning(f"OCR pass error: {e}")
+
+    return collected_results
+
+# ──────────────────────────── Character Repair ────────────────────────────────
+def repair_ocr_digits(text: str) -> str:
+    cleaned = text
+    cleaned = re.sub(r"(?<=[₹Rs\d\.\/])[Il|](?=\d)", "1", cleaned)
+    cleaned = re.sub(r"(?<=\d)[Il|](?=[₹Rs\d\.\/])", "1", cleaned)
+    cleaned = re.sub(r"(?<=[₹Rs\d\.\/])[Oo](?=\d)", "0", cleaned)
+    cleaned = re.sub(r"(?<=\d)[Oo](?=[₹Rs\d\.\/])", "0", cleaned)
+    return cleaned
+
+# ──────────────────────────── SPATIAL REASONING & MASKS ──────────────────────
+def _get_distance(b1: list, b2: list) -> float:
+    # b is [x1, y1, x2, y2]
+    c1x = (b1[0] + b1[2]) / 2
+    c1y = (b1[1] + b1[3]) / 2
+    c2x = (b2[0] + b2[2]) / 2
+    c2y = (b2[1] + b2[3]) / 2
+    return ((c1x - c2x) ** 2 + (c1y - c2y) ** 2) ** 0.5
+
+def _is_below_or_right(anchor: list, target: list, max_dist_multiplier: float = 4.0) -> bool:
+    """Check if target box is reasonably below or to the right of anchor box."""
+    anchor_h = max(1, anchor[3] - anchor[1])
+    # Must be within max_dist_multiplier * anchor height
+    dist = _get_distance(anchor, target)
+    if dist > anchor_h * max_dist_multiplier:
+        return False
+    # Check if mostly below or right
+    if target[1] > anchor[1] - (anchor_h / 2) or target[0] > anchor[0] + (anchor[2]-anchor[0])*0.8:
+        return True
+    return False
+
+def _detect_nutrition_tables(ocr_results: list) -> list:
+    """Identify bounding boxes of nutrition tables to suppress false numbers."""
+    nutrition_keywords = [r"energy", r"protein", r"carbohydrate", r"sugar", r"fat", r"sodium", r"cholesterol"]
+    nutrition_boxes = []
+    for item in ocr_results:
+        text = item["text"].lower()
+        if any(re.search(kw, text) for kw in nutrition_keywords):
+            nutrition_boxes.append(item["bbox_rect"])
+    
+    # Expand boxes to create exclusion zones
+    zones = []
+    for b in nutrition_boxes:
+        h = max(1, b[3] - b[1])
+        w = max(1, b[2] - b[0])
+        zones.append([max(0, b[0] - w), max(0, b[1] - h), b[2] + w, b[3] + h*3])
+    return zones
+
+def _is_in_zones(bbox: list, zones: list) -> bool:
+    for z in zones:
+        # Check intersection
+        if (bbox[0] < z[2] and bbox[2] > z[0] and
+            bbox[1] < z[3] and bbox[3] > z[1]):
+            return True
+    return False
+
+def _merge_adjacent_blocks(ocr_results: list, x_thresh=1.5, y_thresh=2.0) -> list:
+    """Merge lines of text that form a coherent block (e.g. addresses)."""
+    if not ocr_results:
+        return []
+    
+    blocks = []
+    used = set()
+    
+    # Sort top to bottom
+    sorted_items = sorted(ocr_results, key=lambda x: x["center_y"])
+    
+    for i, item in enumerate(sorted_items):
+        if i in used:
+            continue
+        
+        current_block = [item]
+        used.add(i)
+        
+        base_h = item["height"]
+        
+        # Look ahead for adjacent lines
+        for j, other in enumerate(sorted_items):
+            if j in used: continue
+            
+            # Check if other is directly below or adjacent
+            dx = abs(item["center_x"] - other["center_x"])
+            dy = other["center_y"] - current_block[-1]["center_y"]
+            
+            if dx < (base_h * x_thresh) * 5 and 0 < dy < (base_h * y_thresh):
+                current_block.append(other)
+                used.add(j)
+                
+        # Merge block
+        texts = [b["text"] for b in current_block]
+        bboxes = [b["bbox_rect"] for b in current_block]
+        x1 = min(b[0] for b in bboxes)
+        y1 = min(b[1] for b in bboxes)
+        x2 = max(b[2] for b in bboxes)
+        y2 = max(b[3] for b in bboxes)
+        
+        blocks.append({
+            "text": " ".join(texts),
+            "confidence": sum(b["confidence"] for b in current_block) / len(current_block),
+            "bbox_rect": [x1, y1, x2, y2],
+            "original_items": current_block
+        })
+        
+    return blocks
+
+# ──────────────────────────── FIELD DETECTORS ──────────────────────────────
+class BaseDetector:
+    def __init__(self, name: str):
+        self.name = name
+
+    def detect(self, ocr_results: list, nutrition_zones: list, merged_blocks: list, all_text: str) -> list:
         return []
 
+class MRPDetector(BaseDetector):
+    def __init__(self):
+        super().__init__("mrp")
+        self.label_patterns = [r"m\.?\s*r\.?\s*p\.?", r"maximum\s*retail\s*price"]
+        self.val_patterns = [r"(?:₹|rs[\.\:\-\s]*|inr[\.\:\-\s]*)\s*([0-9IlOo,\.]+)", r"^([0-9IlOo,\.]+)$"]
 
-# ──────────────────────────── Field Extraction ────────────────────────────────
+    def detect(self, ocr_results, nutrition_zones, merged_blocks, all_text) -> list:
+        candidates = []
+        labels = []
+        # Find MRP labels
+        for item in ocr_results:
+            text = item["text"].lower()
+            if any(re.search(p, text) for p in self.label_patterns):
+                labels.append(item)
+                
+        for label in labels:
+            label_box = label["bbox_rect"]
+            
+            # Look for values near this label
+            for item in ocr_results:
+                if item == label:
+                    # Check if value is inside the label text itself (e.g. "MRP Rs. 199")
+                    repaired = repair_ocr_digits(item["text"])
+                    m = re.search(r"(?:mrp|price).*?(?:₹|rs[\.\:\-\s]*)\s*([0-9IlOo,\.]+)", repaired, re.IGNORECASE)
+                    if m:
+                        val = m.group(1).strip()
+                        if self._is_valid_mrp(val):
+                            candidates.append({
+                                "text": f"₹{val}",
+                                "confidence": item["confidence"],
+                                "score": item["confidence"] + 1.0, # High score for direct match
+                                "bbox": item["bbox_rect"],
+                                "source_text": item["text"],
+                                "reason": "Extracted directly from MRP label line"
+                            })
+                    continue
 
-# Keyword patterns for field classification
-FIELD_PATTERNS = {
-    "product_name": {
-        "keywords": [],  # Product name is identified by elimination / position
-        "priority": 0,
-    },
-    "net_quantity": {
-        "keywords": [
-            r"net\s*(?:wt|weight|qty|quantity|content|contents|vol|volume)",
-            r"(?:net|nett)\s*:?\s*\d",
-            r"\d+\s*(?:g|gm|gram|grams|kg|kilogram|ml|millilitre|l|litre|liter|litres|cm|m|mm|pieces|pcs)\b",
-        ],
-        "extract_pattern": r"(?:net\s*(?:wt|weight|qty|quantity|content|contents|vol|volume)\s*:?\s*)?([\d]+\.?\d*\s*(?:g|gm|gram|grams|kg|kilogram|kilograms|ml|millilitre|milliliter|l|litre|liter|litres|liters|cm|centimetre|centimeter|m|metre|meter|mm|pieces|pcs|nos|units|pairs|sheets|rolls))",
-        "priority": 2,
-    },
-    "mrp": {
-        "keywords": [
-            r"(?:m\.?\s*r\.?\s*p\.?|mrp|maximum\s*retail\s*price|retail\s*price|price)",
-            r"(?:₹|rs\.?|inr)\s*:?\s*[\d]",
-        ],
-        "extract_pattern": r"(?:m\.?\s*r\.?\s*p\.?\s*:?\s*)?(?:₹|rs\.?|inr\.?)\s*:?\s*([\d,]+\.?\d*)",
-        "priority": 3,
-    },
-    "manufacturer": {
-        "keywords": [
-            r"(?:mfg|mfd|manufactured|marketed|packed|packaged|distributed|imported)\s*(?:by|&|and)?",
-            r"(?:manufacturer|packer|importer|marketer)\s*:?",
-        ],
-        "priority": 1,
-    },
-    "date": {
-        "keywords": [
-            r"(?:mfg|mfd|manufactured|manufacturing|packed|packing|pkg|best\s*before|exp|expiry|use\s*by|import)\s*(?:date|dt|d)?",
-            r"(?:date\s*of\s*(?:mfg|manufacture|manufacturing|packing|import))",
-        ],
-        "extract_pattern": r"(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}|\d{1,2}[/\-\.]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s*\d{2,4})",
-        "priority": 2,
-    },
-    "consumer_care": {
-        "keywords": [
-            r"(?:consumer|customer)\s*(?:care|complaint|grievance|helpline|service|support)",
-            r"(?:toll\s*free|helpline|contact\s*us|for\s*complaints)",
-            r"(?:care@|support@|info@|complaints?@)",
-        ],
-        "priority": 2,
-    },
-    "country_of_origin": {
-        "keywords": [
-            r"(?:country\s*of\s*origin|made\s*in|product\s*of|origin\s*:?)",
-        ],
-        "extract_pattern": r"(?:country\s*of\s*origin|made\s*in|product\s*of)\s*:?\s*(.+?)(?:\.|$|\n)",
-        "priority": 2,
-    },
-    "address": {
-        "keywords": [
-            r"(?:address|addr|regd\.?\s*off|registered\s*office|plot|sector|street|road|lane|nagar|colony|district|state|pin\s*code?|pincode|\d{6})",
-        ],
-        "priority": 1,
-    },
-    "common_name": {
-        "keywords": [
-            r"(?:common\s*name|generic\s*name|also\s*known\s*as)",
-        ],
-        "priority": 0,
-    },
-}
+                if _is_in_zones(item["bbox_rect"], nutrition_zones):
+                    continue
 
+                if _is_below_or_right(label_box, item["bbox_rect"], max_dist_multiplier=5.0):
+                    repaired = repair_ocr_digits(item["text"])
+                    for vp in self.val_patterns:
+                        m = re.search(vp, repaired, re.IGNORECASE)
+                        if m:
+                            val = m.group(1).strip()
+                            if self._is_valid_mrp(val):
+                                dist = _get_distance(label_box, item["bbox_rect"])
+                                dist_penalty = min(0.5, dist / 1000.0)
+                                score = item["confidence"] + 0.8 - dist_penalty
+                                candidates.append({
+                                    "text": f"₹{val}",
+                                    "confidence": item["confidence"],
+                                    "score": score,
+                                    "bbox": item["bbox_rect"],
+                                    "source_text": item["text"],
+                                    "reason": f"Spatially near MRP label (dist: {int(dist)})"
+                                })
+        return candidates
 
-def extract_fields(ocr_results: list[dict], img_shape: tuple) -> dict[str, dict]:
-    """
-    Extract and classify fields from OCR results using regex + keyword matching + spatial relationships.
+    def _is_valid_mrp(self, val: str) -> bool:
+        # Strip commas
+        v = val.replace(",", "")
+        try:
+            f = float(v)
+            if f <= 0: return False # Ignore 0
+            if f > 100000: return False # Ignore absurdly high numbers (e.g. barcodes)
+            return True
+        except ValueError:
+            return False
 
-    Returns: {field_name: {value, normalized_value, confidence, bounding_box, source_text, extraction_method, candidates}}
-    """
+class DateDetector(BaseDetector):
+    def __init__(self):
+        super().__init__("date")
+        self.label_patterns = [r"mfg", r"mfd", r"pkd", r"pkg", r"packed", r"manufactured", r"expiry", r"exp", r"use\s*by", r"best\s*before"]
+        self.val_patterns = [
+            r"(\b\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}\b)",
+            r"(\b\d{1,2}[/\-\.]\d{2,4}\b)",
+            r"(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s/\-\.]+\d{2,4}\b)"
+        ]
+
+    def detect(self, ocr_results, nutrition_zones, merged_blocks, all_text) -> list:
+        candidates = []
+        labels = []
+        for item in ocr_results:
+            text = item["text"].lower()
+            if any(re.search(p, text) for p in self.label_patterns):
+                labels.append(item)
+
+        for label in labels:
+            label_box = label["bbox_rect"]
+            for item in ocr_results:
+                if item == label:
+                    # In-line match
+                    for vp in self.val_patterns:
+                        m = re.search(vp, item["text"], re.IGNORECASE)
+                        if m:
+                            candidates.append({
+                                "text": m.group(1).strip(),
+                                "confidence": item["confidence"],
+                                "score": item["confidence"] + 1.0,
+                                "bbox": item["bbox_rect"],
+                                "source_text": item["text"],
+                                "reason": "Extracted directly from Date label line"
+                            })
+                    continue
+
+                if _is_in_zones(item["bbox_rect"], nutrition_zones): continue
+
+                if _is_below_or_right(label_box, item["bbox_rect"], max_dist_multiplier=5.0):
+                    for vp in self.val_patterns:
+                        m = re.search(vp, item["text"], re.IGNORECASE)
+                        if m:
+                            dist = _get_distance(label_box, item["bbox_rect"])
+                            dist_penalty = min(0.5, dist / 1000.0)
+                            candidates.append({
+                                "text": m.group(1).strip(),
+                                "confidence": item["confidence"],
+                                "score": item["confidence"] + 0.8 - dist_penalty,
+                                "bbox": item["bbox_rect"],
+                                "source_text": item["text"],
+                                "reason": f"Spatially near Date label (dist: {int(dist)})"
+                            })
+        return candidates
+
+class QuantityDetector(BaseDetector):
+    def __init__(self):
+        super().__init__("net_quantity")
+        self.label_patterns = [r"net\s*(?:wt|weight|qty|quantity|vol|volume)"]
+        self.val_patterns = [r"(\b[\d\.]+\s*(?:g|gm|kg|ml|l|ltr|pcs|units)\b)"]
+        self.serving_patterns = [r"serving"]
+
+    def detect(self, ocr_results, nutrition_zones, merged_blocks, all_text) -> list:
+        candidates = []
+        labels = []
+        for item in ocr_results:
+            text = item["text"].lower()
+            if any(re.search(p, text) for p in self.serving_patterns):
+                # Ignore serving size blocks
+                continue
+            if any(re.search(p, text) for p in self.label_patterns):
+                labels.append(item)
+
+        for label in labels:
+            label_box = label["bbox_rect"]
+            for item in ocr_results:
+                if item == label:
+                    m = re.search(r"net[^\d]+([\d\.]+\s*(?:g|gm|kg|ml|l|ltr|pcs|units))", item["text"], re.IGNORECASE)
+                    if m:
+                        candidates.append({
+                            "text": m.group(1).strip(),
+                            "confidence": item["confidence"],
+                            "score": item["confidence"] + 1.0,
+                            "bbox": item["bbox_rect"],
+                            "source_text": item["text"],
+                            "reason": "Direct in-line match"
+                        })
+                    continue
+
+                if _is_below_or_right(label_box, item["bbox_rect"], max_dist_multiplier=4.0):
+                    m = re.search(r"(\b[\d\.]+\s*(?:g|gm|kg|ml|l|ltr|pcs|units)\b)", item["text"], re.IGNORECASE)
+                    if m:
+                        dist = _get_distance(label_box, item["bbox_rect"])
+                        candidates.append({
+                            "text": m.group(1).strip(),
+                            "confidence": item["confidence"],
+                            "score": item["confidence"] + 0.8 - min(0.5, dist/1000.0),
+                            "bbox": item["bbox_rect"],
+                            "source_text": item["text"],
+                            "reason": "Spatially near Net Qty label"
+                        })
+        return candidates
+
+class ManufacturerDetector(BaseDetector):
+    def __init__(self):
+        super().__init__("manufacturer")
+        self.kws = [r"manufactured\s*(?:by|&)?", r"marketed\s*by", r"packed\s*by"]
+
+    def detect(self, ocr_results, nutrition_zones, merged_blocks, all_text) -> list:
+        candidates = []
+        for block in merged_blocks:
+            text = block["text"].lower()
+            if any(re.search(p, text) for p in self.kws):
+                # Extract the entity name roughly
+                clean = block["text"]
+                clean = re.sub(r"^(.*?)(?i)(?:manufactured\s*(?:by|&)?|marketed\s*by|packed\s*by)\s*[:\-]*\s*", "", clean)
+                # Take first line of the remaining block as manufacturer
+                lines = clean.split(" ")
+                val = " ".join(lines[:4]) # Heuristic
+                if len(val) > 3:
+                    candidates.append({
+                        "text": val,
+                        "confidence": block["confidence"],
+                        "score": block["confidence"] + 0.5,
+                        "bbox": block["bbox_rect"],
+                        "source_text": block["text"],
+                        "reason": "Block matched Manufacturer header"
+                    })
+        return candidates
+
+class GenericDetector(BaseDetector):
+    def __init__(self, name: str, kws: list, regexes: list = None):
+        super().__init__(name)
+        self.kws = kws
+        self.regexes = regexes or []
+
+    def detect(self, ocr_results, nutrition_zones, merged_blocks, all_text) -> list:
+        candidates = []
+        for item in ocr_results:
+            text = item["text"].lower()
+            score = 0.0
+            if any(re.search(p, text) for p in self.kws):
+                score += 0.5
+            
+            for rx in self.regexes:
+                m = re.search(rx, item["text"], re.IGNORECASE)
+                if m:
+                    val = m.group(1).strip() if m.groups() else m.group(0).strip()
+                    candidates.append({
+                        "text": val,
+                        "confidence": item["confidence"],
+                        "score": item["confidence"] + score + 0.5,
+                        "bbox": item["bbox_rect"],
+                        "source_text": item["text"],
+                        "reason": f"Regex match + Keyword"
+                    })
+            if score > 0 and not self.regexes:
+                candidates.append({
+                    "text": item["text"],
+                    "confidence": item["confidence"],
+                    "score": item["confidence"] + score,
+                    "bbox": item["bbox_rect"],
+                    "source_text": item["text"],
+                    "reason": "Keyword match"
+                })
+        return candidates
+
+DETECTORS = [
+    MRPDetector(),
+    DateDetector(),
+    QuantityDetector(),
+    ManufacturerDetector(),
+    GenericDetector("consumer_care", [r"consumer", r"care", r"feedback"], [r"([\w\.-]+@[\w\.-]+\.\w+)", r"(1800[-\s]?\d{3}[-\s]?\d{3,4}|\b\d{10}\b)"]),
+    GenericDetector("country_of_origin", [r"country of origin", r"made in", r"product of"], [r"(?:made\s*in|product\s*of)\s*([a-zA-Z\s]+)"]),
+    GenericDetector("address", [r"address", r"regd\.?\s*off", r"pin\s*code"], [r"(\b\d{6}\b)"]),
+    GenericDetector("common_name", [r"common\s*name", r"generic\s*name"]),
+]
+
+def extract_fields(ocr_results: list, img_shape: tuple) -> dict:
     if not ocr_results:
         return _empty_fields()
 
-    # Combine all OCR text for full-text searching
     all_text = " ".join([r["text"] for r in ocr_results])
-    all_text_lower = all_text.lower()
-
-    # Initialize fields
+    nutrition_zones = _detect_nutrition_tables(ocr_results)
+    merged_blocks = _merge_adjacent_blocks(ocr_results)
+    
     fields = {}
-
-    # ── Extract each field ──
-    for field_name, pattern_info in FIELD_PATTERNS.items():
-        candidates = []
-
-        for ocr_item in ocr_results:
-            text = ocr_item["text"]
-            text_lower = text.lower()
-            conf = ocr_item["confidence"]
-            bbox = ocr_item["bbox_rect"]
-
-            score = 0.0
-
-            # Check keyword match
-            for kw in pattern_info.get("keywords", []):
-                if re.search(kw, text_lower):
-                    score += 0.5
-                    break
-
-            # Check extract patterns
-            extract_pat = pattern_info.get("extract_pattern")
-            if extract_pat:
-                match = re.search(extract_pat, text_lower)
-                if match:
-                    score += 0.3
-
-            if score > 0:
-                candidates.append({
-                    "text": text,
-                    "confidence": conf,
-                    "score": score + conf * 0.5,
-                    "bbox": bbox,
-                    "source_text": text,
-                })
-
-        # For fields with extract patterns, also try full text
-        extract_pat = pattern_info.get("extract_pattern")
-        if extract_pat:
-            for m in re.finditer(extract_pat, all_text_lower):
-                extracted_val = m.group(1) if m.groups() else m.group(0)
-                # Find the OCR box that contains this text
-                matching_box = _find_bbox_for_text(extracted_val, ocr_results)
-                candidates.append({
-                    "text": extracted_val.strip(),
-                    "confidence": matching_box["confidence"] if matching_box else 0.7,
-                    "score": 0.9,
-                    "bbox": matching_box["bbox_rect"] if matching_box else None,
-                    "source_text": m.group(0),
-                })
-
-        if candidates:
-            # Rank by score
-            candidates.sort(key=lambda c: c["score"], reverse=True)
-            best = candidates[0]
-
-            # Clean/normalize value
-            normalized = _normalize_field_value(field_name, best["text"])
-
-            fields[field_name] = {
+    
+    for det in DETECTORS:
+        cands = det.detect(ocr_results, nutrition_zones, merged_blocks, all_text)
+        if cands:
+            cands.sort(key=lambda c: c["score"], reverse=True)
+            best = cands[0]
+            fields[det.name] = {
                 "value": best["text"],
-                "normalized_value": normalized,
-                "confidence": round(best["confidence"], 3),
+                "normalized_value": _normalize_field_value(det.name, best["text"]),
+                "confidence": min(1.0, round(best["confidence"], 3)),
                 "bounding_box": best["bbox"],
                 "source_text": best["source_text"],
-                "extraction_method": "ocr_regex_keyword",
-                "candidates": [
-                    {"value": c["text"], "confidence": c["confidence"], "score": round(c["score"], 3)}
-                    for c in candidates[:5]
-                ],
+                "extraction_method": "spatial_aware_detector",
+                "candidates": [{"value": c["text"], "confidence": c["confidence"], "score": round(c["score"], 3), "reason": c.get("reason", "")} for c in cands[:5]],
             }
         else:
-            fields[field_name] = {
+            fields[det.name] = {
                 "value": None,
                 "normalized_value": None,
                 "confidence": 0.0,
@@ -367,245 +596,248 @@ def extract_fields(ocr_results: list[dict], img_shape: tuple) -> dict[str, dict]
                 "candidates": [],
             }
 
-    # ── Product Name Heuristic ──
-    # If product name not found by keywords, use the largest/most prominent text
+    # Product Name Fallback
     if not fields.get("product_name", {}).get("value"):
-        product_candidate = _detect_product_name(ocr_results, fields, img_shape)
-        if product_candidate:
-            fields["product_name"] = product_candidate
+        pn = _detect_prominent_product_name(ocr_results, fields, img_shape)
+        if pn:
+            fields["product_name"] = pn
+        else:
+            fields["product_name"] = _empty_fields()["product_name"]
 
     return fields
 
+def _detect_prominent_product_name(ocr_results: list, existing: dict, img_shape: tuple) -> Optional[dict]:
+    if not ocr_results: return None
+    used = set()
+    for f in existing.values():
+        if f.get("value"): used.add(str(f["value"]).lower())
+    
+    h, w = img_shape[:2] if len(img_shape) >= 2 else (1000, 1000)
+    best = None
+    max_score = 0
+    
+    for item in ocr_results:
+        t = item["text"].strip()
+        if len(t) < 3 or t.lower() in used or re.match(r"^[\d₹\.\,\-\/\:]+$", t):
+            continue
+            
+        bbox = item["bbox_rect"]
+        area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+        y_pos = bbox[1] / h
+        score = (area / (h * w + 1)) * 4.0 + (1.0 - y_pos) * 2.0
+        
+        if score > max_score:
+            max_score = score
+            best = {
+                "value": t,
+                "normalized_value": t.title(),
+                "confidence": round(item["confidence"], 3),
+                "bounding_box": bbox,
+                "source_text": t,
+                "extraction_method": "spatial_headline_heuristic",
+                "candidates": [{"value": t, "confidence": item["confidence"], "score": round(score, 3), "reason": "Largest/topmost text block"}],
+            }
+    return best
 
-def _empty_fields() -> dict[str, dict]:
-    """Return empty field dict when no OCR results."""
-    empty = {}
-    for field_name in FIELD_PATTERNS:
-        empty[field_name] = {
+def _normalize_field_value(field_name: str, value: str) -> str:
+    if not value: return ""
+    val = value.strip()
+    if field_name == "mrp":
+        repaired = repair_ocr_digits(val)
+        nums = re.findall(r"[\d\.]+", repaired)
+        if nums: return f"₹{nums[0]}"
+        return val
+    elif field_name == "product_name": return val.title()
+    elif field_name == "country_of_origin": return re.sub(r"(?:country\s*of\s*origin|made\s*in|product\s*of|[:\.\-])", "", val, flags=re.I).strip().title()
+    return val
+
+def _normalize_for_comparison(field_name: str, value: str) -> str:
+    if not value: return ""
+    val = value.strip().lower()
+    if field_name == "mrp":
+        repaired = repair_ocr_digits(val)
+        nums = re.findall(r"[\d\.]+", repaired)
+        return nums[0] if nums else val
+    elif field_name == "net_quantity":
+        val = re.sub(r"\s+", "", val)
+        val = re.sub(r"gms?|gram?s?", "g", val)
+        return val
+    return re.sub(r"[^\w\s]", "", val).strip()
+
+def _empty_fields() -> dict:
+    names = ["product_name", "net_quantity", "mrp", "manufacturer", "date", "consumer_care", "country_of_origin", "address", "common_name"]
+    return {
+        k: {
             "value": None,
             "normalized_value": None,
             "confidence": 0.0,
             "bounding_box": None,
             "source_text": "",
             "extraction_method": "not_detected",
-            "candidates": [],
+            "candidates": []
         }
-    return empty
-
-
-def _find_bbox_for_text(text: str, ocr_results: list[dict]) -> Optional[dict]:
-    """Find the OCR result that best matches the given text."""
-    text_lower = text.lower().strip()
-    for item in ocr_results:
-        if text_lower in item["text"].lower():
-            return item
-    return None
-
-
-def _detect_product_name(ocr_results: list[dict], existing_fields: dict, img_shape: tuple) -> Optional[dict]:
-    """
-    Detect product name using spatial heuristics:
-    - Usually the largest text
-    - Usually at the top/center of the image
-    - Not already classified as another field
-    """
-    if not ocr_results:
-        return None
-
-    # Get texts already used for other fields
-    used_texts = set()
-    for field_data in existing_fields.values():
-        if field_data.get("value"):
-            used_texts.add(field_data["value"].lower())
-
-    h, w = img_shape[:2] if len(img_shape) >= 2 else (1000, 1000)
-
-    best_candidate = None
-    best_score = 0
-
-    for item in ocr_results:
-        text = item["text"].strip()
-        if len(text) < 2 or text.lower() in used_texts:
-            continue
-
-        # Skip items that look like numbers, dates, or prices
-        if re.match(r"^[\d₹\.\,\-\/]+$", text):
-            continue
-
-        bbox = item["bbox_rect"]
-        # Score based on: size, position (top of image = higher), text length
-        text_height = bbox[3] - bbox[1]
-        text_width = bbox[2] - bbox[0]
-        area = text_height * text_width
-        y_position = bbox[1] / h  # 0 = top, 1 = bottom
-
-        score = (area / (h * w + 1)) * 3 + (1 - y_position) * 2 + min(len(text) / 30, 1)
-
-        if score > best_score:
-            best_score = score
-            best_candidate = {
-                "value": text,
-                "normalized_value": text.title(),
-                "confidence": round(item["confidence"], 3),
-                "bounding_box": bbox,
-                "source_text": text,
-                "extraction_method": "spatial_heuristic",
-                "candidates": [{"value": text, "confidence": item["confidence"], "score": round(score, 3)}],
-            }
-
-    return best_candidate
-
-
-def _normalize_field_value(field_name: str, value: str) -> str:
-    """Normalize field values for validation."""
-    if not value:
-        return ""
-
-    value = value.strip()
-
-    if field_name == "mrp":
-        # Extract numeric part
-        nums = re.findall(r"[\d,]+\.?\d*", value)
-        if nums:
-            return "₹" + nums[0].replace(",", "")
-        return value
-
-    elif field_name == "net_quantity":
-        return value.strip()
-
-    elif field_name == "date":
-        return value.strip()
-
-    elif field_name == "product_name":
-        return value.title()
-
-    return value
-
-
-# ──────────────────────────── Annotated Image Generation ──────────────────────
-def create_annotated_image(
-    img: np.ndarray,
-    ocr_results: list[dict],
-    fields: dict[str, dict],
-    violations: list[dict] | None = None,
-) -> np.ndarray:
-    """
-    Create annotated image with:
-    - OCR bounding boxes (blue)
-    - Detected field labels (green)
-    - Violation highlights (red)
-    """
-    annotated = img.copy()
-
-    # Draw OCR boxes (light blue, thin)
-    for item in ocr_results:
-        bbox = item["bbox_rect"]
-        cv2.rectangle(annotated, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255, 180, 0), 1)
-
-    # Draw field boxes (green with labels)
-    field_labels = {
-        "product_name": "Product Name",
-        "net_quantity": "Net Qty",
-        "mrp": "MRP",
-        "manufacturer": "Manufacturer",
-        "date": "Date",
-        "consumer_care": "Consumer Care",
-        "country_of_origin": "Country of Origin",
-        "address": "Address",
-        "common_name": "Common Name",
+        for k in names
     }
 
-    violation_fields = set()
-    if violations:
-        for v in violations:
-            violation_fields.add(v.get("field", ""))
+def create_annotated_image(img: np.ndarray, ocr_results: list, fields: dict, violations=None) -> np.ndarray:
+    annotated = img.copy()
+    violation_fields = {v.get("field") for v in (violations or [])}
 
-    for field_name, field_data in fields.items():
-        bbox = field_data.get("bounding_box")
+    # For general OCR layer (draw faint boxes)
+    for item in ocr_results:
+        b = item["bbox_rect"]
+        cv2.rectangle(annotated, (b[0], b[1]), (b[2], b[3]), (230, 230, 230), 1)
+
+    # For Legal Declaration Evidence layer (draw strong boxes)
+    for field_name, fdata in fields.items():
+        bbox = fdata.get("bounding_box")
         if not bbox or len(bbox) < 4:
             continue
 
-        label = field_labels.get(field_name, field_name)
-        is_violation = field_name in violation_fields
+        is_viol = field_name in violation_fields
+        conf = fdata.get("confidence", 0)
+        color = (40, 40, 235) if is_viol else ((40, 200, 40) if conf >= 0.6 else (0, 165, 255))
+        cv2.rectangle(annotated, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 3)
 
-        if is_violation:
-            color = (0, 0, 255)  # Red
-            thickness = 3
-        elif field_data.get("confidence", 0) < 0.6:
-            color = (0, 165, 255)  # Orange
-            thickness = 2
-        else:
-            color = (0, 200, 0)  # Green
-            thickness = 2
-
-        cv2.rectangle(annotated, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, thickness)
-
-        # Draw label background
-        label_text = f"{label} ({field_data.get('confidence', 0):.0%})"
-        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        label_y = max(bbox[1] - 5, th + 5)
-        cv2.rectangle(annotated, (bbox[0], label_y - th - 4), (bbox[0] + tw + 4, label_y + 2), color, -1)
-        cv2.putText(annotated, label_text, (bbox[0] + 2, label_y - 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        label = f"{field_name.replace('_', ' ').title()} ({conf:.0%})"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        y = max(bbox[1] - 4, th + 4)
+        cv2.rectangle(annotated, (bbox[0], y - th - 3), (bbox[0] + tw + 6, y + 2), color, -1)
+        cv2.putText(annotated, label, (bbox[0] + 3, y - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
 
     return annotated
 
-
-# ──────────────────────────── Full Pipeline ───────────────────────────────────
-def process_image(image_path: str) -> dict:
-    """
-    Full OCR pipeline:
-    1. Load image
-    2. Quality assessment
-    3. Preprocess
-    4. OCR
-    5. Field extraction
-    6. Return structured results
-    """
-    import time
-    start = time.time()
-
-    # Load image
-    img = cv2.imread(image_path)
-    if img is None:
-        # Try with PIL for more format support
-        try:
+def process_single_image(image_path: str) -> dict:
+    img = None
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
             pil_img = Image.open(image_path).convert("RGB")
             img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Cannot load image: {str(e)}",
-                "quality": {"overall_score": 0, "issues": ["Image could not be loaded"]},
-                "ocr_results": [],
-                "fields": _empty_fields(),
-                "processing_time_ms": 0,
-            }
-
-    # Quality assessment
+    except Exception as e:
+        return {
+            "success": False, "error": str(e), "ocr_results": [],
+            "fields": _empty_fields(),
+            "quality": {"overall_score": 0, "issues": ["Failed to read image"], "is_suitable": False, "quality_label": "Poor"},
+        }
     quality = assess_image_quality(img)
-
-    # Preprocess
-    preprocessed = preprocess_image(img)
-
-    # OCR
-    ocr_results = run_ocr(preprocessed)
-
-    # Field extraction
+    ocr_results = run_ocr(img)
     fields = extract_fields(ocr_results, img.shape)
-
-    # Generate annotated image
     annotated = create_annotated_image(img, ocr_results, fields)
+    return {
+        "success": True, "quality": quality, "ocr_results": ocr_results,
+        "fields": fields, "annotated_image": annotated, "original_image": img, "ocr_text_count": len(ocr_results),
+    }
 
-    elapsed = int((time.time() - start) * 1000)
+def process_image(image_path: str) -> dict:
+    return process_single_image(image_path)
+
+def _fuse_field_candidates(field_name: str, per_image_candidates: list) -> dict:
+    valid = [c for c in per_image_candidates if c.get("value")]
+    if not valid:
+        base = _empty_fields()[field_name]
+        base.update({"conflict_detected": False, "all_image_candidates": [], "source_image_index": None, "source_image_number": None})
+        return base
+
+    normalized_groups: Dict[str, list] = {}
+    for c in valid:
+        norm = _normalize_for_comparison(field_name, c["value"])
+        if norm not in normalized_groups: normalized_groups[norm] = []
+        normalized_groups[norm].append(c)
+
+    conflict_detected = len(normalized_groups) > 1
+    best = max(valid, key=lambda c: c.get("confidence", 0))
+
+    all_candidates = []
+    for c in valid:
+        all_candidates.append({
+            "value": c["value"],
+            "normalized_value": _normalize_field_value(field_name, c["value"]),
+            "confidence": round(c.get("confidence", 0), 3),
+            "source_image_index": c.get("image_index", 0),
+            "source_image_number": c.get("image_number", 1),
+            "bounding_box": c.get("bounding_box"),
+            "source_text": c.get("source_text", ""),
+            "reason": c.get("candidates", [{}])[0].get("reason", "") if c.get("candidates") else ""
+        })
+    all_candidates.sort(key=lambda x: x["confidence"], reverse=True)
+
+    return {
+        "value": best["value"],
+        "normalized_value": _normalize_field_value(field_name, best["value"]),
+        "confidence": round(best.get("confidence", 0), 3),
+        "bounding_box": best.get("bounding_box"),
+        "source_text": best.get("source_text", ""),
+        "extraction_method": best.get("extraction_method", "ocr_regex_spatial"),
+        "candidates": [{"value": c["value"], "confidence": c["confidence"], "score": c["confidence"], "reason": c.get("reason", "")} for c in all_candidates[:5]],
+        "conflict_detected": conflict_detected,
+        "all_image_candidates": all_candidates,
+        "source_image_index": best.get("image_index", 0),
+        "source_image_number": best.get("image_number", 1),
+        "needs_review_due_to_conflict": conflict_detected,
+    }
+
+def process_multiple_images(image_paths: List[str]) -> dict:
+    start = time.time()
+    per_image_results = []
+    overall_quality_scores = []
+    all_quality_issues = []
+
+    for idx, path in enumerate(image_paths):
+        image_number = idx + 1
+        logger.info(f"Processing image {image_number}/{len(image_paths)}: {path}")
+        res = process_single_image(path)
+        res["image_index"] = idx
+        res["image_number"] = image_number
+        res["image_path"] = path
+        per_image_results.append(res)
+        if res.get("success"):
+            overall_quality_scores.append(res["quality"]["overall_score"])
+            all_quality_issues.extend(res["quality"].get("issues", []))
+
+    per_field_candidates: Dict[str, list] = {k: [] for k in _empty_fields().keys()}
+    for res in per_image_results:
+        if not res.get("success"): continue
+        for field_name, fdata in res.get("fields", {}).items():
+            if fdata.get("value"):
+                candidate = dict(fdata)
+                candidate["image_index"] = res["image_index"]
+                candidate["image_number"] = res["image_number"]
+                per_field_candidates[field_name].append(candidate)
+
+    fused_fields = {}
+    for field_name in per_field_candidates:
+        fused_fields[field_name] = _fuse_field_candidates(field_name, per_field_candidates[field_name])
+
+    if not fused_fields.get("product_name", {}).get("value"):
+        for res in sorted(per_image_results, key=lambda r: r.get("quality", {}).get("overall_score", 0), reverse=True):
+            if res.get("success") and res.get("ocr_results"):
+                pn = _detect_prominent_product_name(res["ocr_results"], fused_fields, res["original_image"].shape if res.get("original_image") is not None else (1000, 1000))
+                if pn:
+                    pn["source_image_index"] = res["image_index"]
+                    pn["source_image_number"] = res["image_number"]
+                    pn["conflict_detected"] = False
+                    pn["all_image_candidates"] = [{"value": pn["value"], "confidence": pn["confidence"], "source_image_index": res["image_index"], "source_image_number": res["image_number"]}]
+                    fused_fields["product_name"] = pn
+                    break
+
+    elapsed_ms = int((time.time() - start) * 1000)
+    avg_quality = sum(overall_quality_scores) / len(overall_quality_scores) if overall_quality_scores else 0.8
+    successful_images = sum(1 for r in per_image_results if r.get("success"))
 
     return {
         "success": True,
-        "quality": quality,
-        "ocr_results": ocr_results,
-        "fields": fields,
-        "annotated_image": annotated,
-        "original_image": img,
-        "processing_time_ms": elapsed,
-        "ocr_engine": "easyocr",
+        "total_images": len(image_paths),
+        "successful_images": successful_images,
+        "fields": fused_fields,
+        "quality": {
+            "overall_score": round(avg_quality, 2),
+            "issues": list(set(all_quality_issues)),
+            "is_suitable": avg_quality >= 0.4,
+            "quality_label": "Good" if avg_quality >= 0.75 else ("Fair" if avg_quality >= 0.5 else "Poor"),
+        },
+        "per_image_results": per_image_results,
+        "has_conflicts": any(fdata.get("conflict_detected") for fdata in fused_fields.values()),
+        "conflict_fields": [fname for fname, fdata in fused_fields.items() if fdata.get("conflict_detected")],
+        "ocr_engine": "easyocr_multipass_spatial_v3",
     }
