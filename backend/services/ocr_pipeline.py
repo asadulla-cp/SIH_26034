@@ -57,7 +57,12 @@ def _get_ocr_reader(languages: Optional[List[str]] = None):
         except AttributeError:
             pass
         import easyocr
-        reader = easyocr.Reader(list(langs_tuple), gpu=False, verbose=False)
+        # Use the same model dir as the startup pre-warmer so models aren't re-downloaded
+        from pathlib import Path as _Path
+        _model_dir = str(_Path(__file__).parent.parent.parent / ".easyocr_models")
+        import os as _os
+        _os.makedirs(_model_dir, exist_ok=True)
+        reader = easyocr.Reader(list(langs_tuple), gpu=False, verbose=False, model_storage_directory=_model_dir)
         _ocr_readers[langs_tuple] = reader
         _ocr_available = True
         logger.info(f"EasyOCR initialized successfully for languages: {langs_tuple}")
