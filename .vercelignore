@@ -1,0 +1,14 @@
+# Hide Python backend from Vercel's framework auto-detector.
+# Vercel is a static/frontend host — the FastAPI backend runs separately.
+backend/
+rules/
+tests/
+requirements.txt
+*.py
+*.db
+uploads/
+annotated/
+reports/
+demo/
+docs/
+docker/
