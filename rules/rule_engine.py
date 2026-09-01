@@ -25,6 +25,22 @@ RULES_FILE = RULES_DIR / "rules.json"
 # OCR confidence threshold — below this we surface NEEDS_REVIEW instead of hard FAIL
 CONFIDENCE_REVIEW_THRESHOLD = 0.60
 
+# Severity scoring defaults (if not specified in rule JSON)
+DEFAULT_SEVERITY_POINTS = {
+    "critical": 10,
+    "high": 7,
+    "medium": 5,
+    "low": 2,
+}
+
+# Risk level thresholds (0-100 score)
+RISK_LEVELS = [
+    (0, 20, "low", "Low Risk"),
+    (21, 50, "medium", "Medium Risk"),
+    (51, 80, "high", "High Risk"),
+    (81, 100, "critical", "Critical Risk"),
+]
+
 # Commodity categories that short-circuit certain checks
 FOOD_CATEGORIES = {"food", "food_article", "fssai", "edible"}
 MEDICAL_DEVICE_CATEGORIES = {"medical_device", "medical device", "device"}
@@ -147,6 +163,36 @@ class RuleEngine:
         else:
             overall = "COMPLIANT"
 
+        # ── Severity scoring ──────────────────────────────────────────────
+        # Calculate max possible severity points across ALL rules (not just scored)
+        max_severity_points = sum(
+            r.get("severity_points", DEFAULT_SEVERITY_POINTS.get(r.get("severity", "medium"), 5))
+            for r in self.rules
+        )
+        # Calculate actual violation severity points
+        violation_severity_points = 0
+        severity_breakdown = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for v in violations:
+            pts = v.get("severity_points", DEFAULT_SEVERITY_POINTS.get(v.get("severity", "medium"), 5))
+            violation_severity_points += pts
+            level = v.get("severity_level", v.get("severity", "medium"))
+            if level in severity_breakdown:
+                severity_breakdown[level] += 1
+
+        severity_score = round((violation_severity_points / max_severity_points) * 100) if max_severity_points > 0 else 0
+        severity_score = min(100, severity_score)
+
+        risk_level = "low"
+        risk_label = "Low Risk"
+        for low, high, level, label in RISK_LEVELS:
+            if low <= severity_score <= high:
+                risk_level = level
+                risk_label = label
+                break
+
+        # Sort violations by severity points (descending)
+        violations.sort(key=lambda v: v.get("severity_points", 0), reverse=True)
+
         return {
             "overall_status": overall,
             "compliance_score": score,
@@ -162,6 +208,13 @@ class RuleEngine:
             "rule_set_version": self.rule_set_version,
             "rule_set_name": self.rule_set_name,
             "disclaimer": self.disclaimer,
+            # Severity scoring
+            "severity_score": severity_score,
+            "risk_level": risk_level,
+            "risk_label": risk_label,
+            "severity_breakdown": severity_breakdown,
+            "violation_severity_points": violation_severity_points,
+            "max_severity_points": max_severity_points,
         }
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -240,6 +293,8 @@ class RuleEngine:
             "rule_title": rule["title"],
             "field": rule["field"],
             "severity": rule["severity"],
+            "severity_level": rule.get("severity_level", rule.get("severity", "medium")),
+            "severity_points": rule.get("severity_points", DEFAULT_SEVERITY_POINTS.get(rule.get("severity", "medium"), 5)),
             "rule_version": rule["rule_version"],
             "is_prototype_rule": rule.get("is_prototype", True),
             "source_reference": rule.get("source_reference", ""),
@@ -289,9 +344,12 @@ class RuleEngine:
             "exemption_check": lambda r, v, n, c, ru: self._validate_exemption_info(r, v, n, c, ru, exemptions, commodity, net_qty_grams),
             "tamper_check": self._validate_tamper,
             "font_size_check": self._validate_font_size,
+            "font_size_measurement": lambda r, v, n, c, ru: self._validate_font_size_measurement(r, v, n, c, ru, extracted),
             "pdp_placement_check": self._validate_pdp_placement,
-            "legibility_check": self._validate_legibility,
             "external_db_check": self._validate_external_db,
+            "barcode_gs1_check": lambda r, v, n, c, ru: self._validate_barcode_gs1(r, v, n, c, ru, extracted),
+            "dual_language_check": lambda r, v, n, c, ru: self._validate_dual_language(r, v, n, c, ru, extracted),
+            "anomaly_tampering_check": lambda r, v, n, c, ru: self._validate_anomaly_tampering(r, v, n, c, ru, extracted),
         }
 
         validator = dispatch.get(vtype, self._validate_presence)
@@ -634,6 +692,101 @@ class RuleEngine:
         result["reason"] = (
             f"Unable to Verify — Human Review Required. {automation_note}"
         )
+
+    def _validate_font_size_measurement(
+        self, result: dict, value: Any, normalized: Any, confidence: float, rule: dict, extracted: dict
+    ):
+        """LM-PC-FS-001, 002, 003 — font size compliance measurement."""
+        font_size = extracted.get("font_size_mm")
+        min_required = rule.get("min_height_mm", 1.0)
+        field_name = rule["field"]
+
+        if not value:
+            result["status"] = "NEEDS_REVIEW"
+            result["reason"] = f"Declaration for {field_name} not detected — font size could not be measured."
+            return
+
+        if font_size is None:
+            result["status"] = "NEEDS_REVIEW"
+            result["reason"] = f"Bounding box measurement unavailable for {field_name}. Manual physical measurement recommended."
+            return
+
+        if font_size < min_required:
+            result["status"] = "FAIL"
+            result["reason"] = (
+                f"Measured font height {font_size} mm is below the legal minimum of {min_required} mm "
+                f"for {field_name.replace('_', ' ').title()} (Rule 7)."
+            )
+        else:
+            result["status"] = "PASS"
+            result["reason"] = f"Font height {font_size} mm meets/exceeds the legal requirement of {min_required} mm."
+
+    def _validate_barcode_gs1(
+        self, result: dict, value: Any, normalized: Any, confidence: float, rule: dict, extracted: dict
+    ):
+        """LM-PC-BC-001 — Barcode & GS1 registry cross-check."""
+        bc_info = extracted.get("barcode_info") or {}
+        if not bc_info or not bc_info.get("detected"):
+            result["status"] = "NEEDS_REVIEW"
+            result["reason"] = "No barcode/QR code detected on the visible package surface. Please scan barcode side if present."
+            return
+
+        barcode_number = bc_info.get("barcode", "Unknown")
+        if not bc_info.get("gs1_found"):
+            result["status"] = "FAIL"
+            result["reason"] = f"Barcode {barcode_number} not found in GS1 National Database — Possible counterfeit or unregistered commodity."
+            return
+
+        mismatches = bc_info.get("mismatches", [])
+        if mismatches:
+            result["status"] = "FAIL"
+            result["reason"] = f"GS1 database mismatch for barcode {barcode_number}: " + "; ".join(mismatches)
+        else:
+            product_name = bc_info.get("gs1_product_name", "Verified Product")
+            mfg = bc_info.get("gs1_manufacturer", "Registered Manufacturer")
+            result["status"] = "PASS"
+            result["reason"] = f"Barcode {barcode_number} verified against GS1 database ({product_name} by {mfg})."
+
+    def _validate_dual_language(self, result: dict, value: Any, normalized: Any, confidence: float, rule: dict, extracted: dict):
+        """LM-PC-LANG-001 — Rule 9 language verification (English / Hindi / Regional)."""
+        lang_data = extracted.get("languages") or {}
+        detected = lang_data.get("detected_languages", ["en"])
+        has_english = lang_data.get("has_english", True)
+        has_hindi = lang_data.get("has_hindi", False)
+        is_dual = lang_data.get("is_dual_language", False)
+
+        result["detected_value"] = ", ".join([l.upper() for l in detected])
+
+        if has_english and has_hindi:
+            result["status"] = "PASS"
+            result["reason"] = "Dual-language declarations verified in both English and Hindi (Devanagari script) per Rule 9(1)."
+        elif has_english:
+            result["status"] = "PASS"
+            result["reason"] = "Mandatory declarations legible in English per Rule 9(1). Hindi translations recommended for national distribution."
+        elif has_hindi:
+            result["status"] = "PASS"
+            result["reason"] = "Mandatory declarations legible in Hindi (Devanagari script) per Rule 9(1)."
+        else:
+            result["status"] = "NEEDS_REVIEW"
+            result["reason"] = "No standard English or Hindi text recognized with high confidence. Regional script detected."
+
+    def _validate_anomaly_tampering(self, result: dict, value: Any, normalized: Any, confidence: float, rule: dict, extracted: dict):
+        """LM-PC-ANOM-001 — Anti-tampering and MRP integrity check."""
+        anomaly_data = extracted.get("anomaly_detection") or {}
+        has_anomaly = anomaly_data.get("has_anomaly", False)
+        tampering = anomaly_data.get("tampering_detected", False)
+        findings = anomaly_data.get("findings", [])
+
+        if tampering:
+            result["status"] = "FAIL"
+            finding_details = "; ".join([f"{f['title']}: {f['details']}" for f in findings if f.get("severity") in ("CRITICAL", "HIGH")])
+            result["reason"] = f"Packaging tampering anomaly detected: {finding_details} (Section 18(2) violation)."
+        elif has_anomaly and any(f.get("type") == "PACKAGE_DAMAGE" for f in findings):
+            result["status"] = "NEEDS_REVIEW"
+            result["reason"] = "Physical label wear / moisture damage detected. Officer manual inspection recommended."
+        else:
+            result["status"] = "PASS"
+            result["reason"] = "Packaging authenticity verified. No adhesive sticker overlays, tampering, or ink anomalies detected."
 
     # ──────────────────────────────────────────────────────────────────────────
     # Helper

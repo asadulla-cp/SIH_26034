@@ -20,6 +20,7 @@ import {
   Camera,
   Loader,
   Package,
+  Globe
 } from 'lucide-react';
 import {
   scanUploadedImages,
@@ -29,6 +30,7 @@ import {
   getReportDownloadUrl,
   submitReviewAction
 } from '../api';
+import { queueOfflineInspection } from '../offline-queue';
 import type { DemoProduct, ExtractedField, Violation } from '../types';
 
 // ─────────────────────────── Types ────────────────────────────────────────────
@@ -78,6 +80,9 @@ export const ScanProduct: React.FC = () => {
 
   // Drag state
   const [isDragging, setIsDragging] = useState(false);
+
+  // Multi-Language selection
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['en', 'hi']);
 
   useEffect(() => {
     getDemoProducts().then(setDemoProducts).catch(console.error);
@@ -180,14 +185,38 @@ export const ScanProduct: React.FC = () => {
 
     advanceStep();
 
+    // Capture GPS Geolocation
+    let coords: { latitude?: number; longitude?: number } | undefined;
+    if (navigator.geolocation) {
+      try {
+        const pos: any = await new Promise((resolve) => {
+          navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), { timeout: 3000 });
+        });
+        if (pos?.coords) {
+          coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+        }
+      } catch (e) {
+        console.debug('Geolocation skipped:', e);
+      }
+    }
+
     try {
-      const data = await scanUploadedImages(files);
+      if (!navigator.onLine) {
+        throw new Error('OFFLINE_MODE');
+      }
+
+      const data = await scanUploadedImages(files, coords, selectedLanguages);
       clearInterval(interval);
       setProcessingSteps(prev => prev.map(s => ({ ...s, status: 'done' })));
       setResult(data);
     } catch (err: any) {
       clearInterval(interval);
-      setError(err.message || 'Inspection failed');
+      if (err.message === 'OFFLINE_MODE' || !navigator.onLine) {
+        await queueOfflineInspection(files, coords);
+        setError('Device is offline. Your inspection has been queued locally in IndexedDB and will auto-sync when online.');
+      } else {
+        setError(err.message || 'Inspection failed');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -529,6 +558,51 @@ export const ScanProduct: React.FC = () => {
                     <span style={{ fontSize: '10px' }}>{imageSlots.length}/{MAX_IMAGES}</span>
                   </div>
                 )}
+              </div>
+
+              {/* Multi-Language Selector */}
+              <div style={{ marginBottom: '16px', padding: '12px 14px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Globe size={14} color="var(--accent-primary)" />
+                  Multi-Language OCR Recognition:
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {[
+                    { id: 'en', label: 'English (Default)' },
+                    { id: 'hi', label: 'Hindi (हिन्दी)' },
+                    { id: 'ta', label: 'Tamil (தமிழ்)' },
+                    { id: 'bn', label: 'Bengali (বাংলা)' },
+                    { id: 'mr', label: 'Marathi (मराठी)' },
+                    { id: 'gu', label: 'Gujarati (ગુજરાતી)' },
+                  ].map((lang) => {
+                    const isSel = selectedLanguages.includes(lang.id);
+                    return (
+                      <button
+                        key={lang.id}
+                        type="button"
+                        onClick={() => {
+                          if (lang.id === 'en') return; // English is mandatory base
+                          setSelectedLanguages((prev) =>
+                            isSel ? prev.filter((l) => l !== lang.id) : [...prev, lang.id]
+                          );
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '999px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: lang.id === 'en' ? 'default' : 'pointer',
+                          background: isSel ? 'var(--accent-primary)' : 'var(--bg-card)',
+                          color: isSel ? '#fff' : 'var(--text-secondary)',
+                          border: `1px solid ${isSel ? 'var(--accent-primary)' : 'var(--border-default)'}`,
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {isSel ? '✓ ' : '+ '}{lang.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Action Buttons */}

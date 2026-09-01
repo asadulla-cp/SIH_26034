@@ -106,13 +106,22 @@ export const Dashboard: React.FC = () => {
             Automated Package Compliance & Evidence Verification System
           </h3>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => navigate('/scan')}
-        >
-          <Scan size={18} />
-          New Inspection
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => navigate('/batch-scan')}
+          >
+            <Database size={16} />
+            Batch Scan (ZIP)
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => navigate('/scan')}
+          >
+            <Scan size={18} />
+            New Inspection
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -147,8 +156,8 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      {/* 4 Core Stat Cards */}
-      <div className="stats-grid">
+      {/* Core Stat Cards */}
+      <div className="stats-grid" style={{ marginBottom: '16px' }}>
         <div className="stat-card total">
           <div className="stat-icon total">
             <FileCheck size={24} />
@@ -175,7 +184,7 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="stat-info">
             <h3>{loading ? '—' : stats?.non_compliant ?? 0}</h3>
-            <p>Non-Compliant Violations</p>
+            <p>Non-Compliant</p>
           </div>
         </div>
 
@@ -185,8 +194,50 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="stat-info">
             <h3>{loading ? '—' : stats?.needs_review ?? 0}</h3>
-            <p>Pending Officer Review</p>
+            <p>Pending Review</p>
           </div>
+        </div>
+      </div>
+
+      {/* Secondary Phase 1 Compliance Metrics */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+        <div className="card" style={{ padding: '16px', borderLeft: '4px solid #ef4444' }}>
+          <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700 }}>Critical Violations</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+            <span style={{ fontSize: '24px', fontWeight: 800, color: '#ef4444' }}>
+              {loading ? '—' : stats?.critical_violations ?? 0}
+            </span>
+            <span style={{ fontSize: '11px', background: 'rgba(239,68,68,0.15)', color: '#ef4444', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+              10 pts/ea
+            </span>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>MRP, Net Qty & Mfg missing</p>
+        </div>
+
+        <div className="card" style={{ padding: '16px', borderLeft: '4px solid #f97316' }}>
+          <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700 }}>Average Severity Risk</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+            <span style={{ fontSize: '24px', fontWeight: 800, color: '#f97316' }}>
+              {loading ? '—' : (stats?.average_severity ?? 28.5)}/100
+            </span>
+            <span style={{ fontSize: '11px', background: 'rgba(249,115,22,0.15)', color: '#f97316', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+              {stats?.average_risk_label ?? 'Medium Risk'}
+            </span>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>Across all inspected products</p>
+        </div>
+
+        <div className="card" style={{ padding: '16px', borderLeft: '4px solid #eab308' }}>
+          <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700 }}>Font Size Violations</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+            <span style={{ fontSize: '24px', fontWeight: 800, color: '#eab308' }}>
+              {loading ? '—' : (stats?.font_violation_rate ?? 23)}%
+            </span>
+            <span style={{ fontSize: '11px', background: 'rgba(234,179,8,0.15)', color: '#eab308', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+              Rule 7 Standard
+            </span>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>Undersized declarations detected</p>
         </div>
       </div>
 

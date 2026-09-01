@@ -44,6 +44,23 @@ class Inspection(Base):
     commodity_confidence = Column(Float, nullable=True)  # Detection confidence 0.0-1.0
     commodity_detection_meta = Column(JSON, nullable=True)  # Full detection result metadata
     
+    # Severity & Risk Scoring
+    severity_score = Column(Float, default=0.0)  # 0-100 risk score
+    risk_level = Column(String, default="low")    # low / medium / high / critical
+    
+    # GPS Tagging (PWA)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    
+    # Barcode / GS1 data
+    barcode_data = Column(JSON, nullable=True)
+    
+    # Anomaly Detection & Forensics
+    anomaly_data = Column(JSON, nullable=True)
+    
+    # Multi-language detection metadata
+    detected_languages = Column(JSON, nullable=True)
+    
     # User tracking - links inspection to officer who performed it
     user_id = Column(String, ForeignKey("users.id"), nullable=True)  # Nullable for backward compatibility
     
@@ -55,6 +72,7 @@ class Inspection(Base):
     extracted_fields = relationship("ExtractedField", back_populates="inspection", cascade="all, delete-orphan")
     violations = relationship("Violation", back_populates="inspection", cascade="all, delete-orphan")
     review_actions = relationship("ReviewAction", back_populates="inspection", cascade="all, delete-orphan")
+    legal_notices = relationship("LegalNotice", back_populates="inspection", cascade="all, delete-orphan")
 
 
 class ExtractedField(Base):
@@ -69,6 +87,8 @@ class ExtractedField(Base):
     confidence = Column(Float, default=0.0)
     status = Column(String, default="PENDING")  # PASS / FAIL / NEEDS_REVIEW / NOT_DETECTED
     bounding_box = Column(JSON, nullable=True)  # [x1, y1, x2, y2]
+    font_size_mm = Column(Float, nullable=True)  # Measured font height in mm
+    min_font_size_mm = Column(Float, nullable=True)  # Minimum legal required font height in mm
     source_text = Column(Text, nullable=True)
     extraction_method = Column(String, default="ocr_regex")
     candidates = Column(JSON, nullable=True)  # Alternative candidates with confidence
@@ -84,7 +104,8 @@ class Violation(Base):
     inspection_id = Column(String, ForeignKey("inspections.id"), nullable=False)
     rule_id = Column(String, nullable=False)
     field = Column(String, nullable=False)
-    severity = Column(String, default="high")  # high / medium / low
+    severity = Column(String, default="high")  # high / medium / low / critical
+    severity_points = Column(Integer, default=5)  # 2, 5, 7, 10
     title = Column(String, nullable=False)
     detected_value = Column(Text, nullable=True)
     expected_requirement = Column(Text, nullable=True)
@@ -148,3 +169,25 @@ class User(Base):
     
     # Relationship: all inspections performed by this user
     inspections = relationship("Inspection", back_populates="performed_by")
+
+
+class LegalNotice(Base):
+    """Auto-generated Legal Notice issued under Legal Metrology Act, 2009."""
+    __tablename__ = "legal_notices"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    notice_id = Column(String, unique=True, nullable=False)  # e.g. NOTICE-MLX-20260901-001
+    inspection_id = Column(String, ForeignKey("inspections.id"), nullable=False)
+    manufacturer_name = Column(String, nullable=True)
+    manufacturer_email = Column(String, nullable=True)
+    total_penalty = Column(Integer, default=0)
+    violations_summary = Column(JSON, nullable=True)
+    status = Column(String, default="GENERATED")  # GENERATED / SENT / RESPONDED / PENDING
+    pdf_path = Column(String, nullable=True)
+    response_deadline = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=now_utc)
+
+    # Relationship
+    inspection = relationship("Inspection", back_populates="legal_notices")
+

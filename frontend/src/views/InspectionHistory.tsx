@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Database, ArrowRight, Download, Trash2 } from 'lucide-react';
+import { Search, Database, ArrowRight, Download, Trash2, MapPin } from 'lucide-react';
 import { getInspections, getReportDownloadUrl, clearAllInspections } from '../api';
 import type { Inspection } from '../types';
 
@@ -206,14 +206,24 @@ export const InspectionHistory: React.FC = () => {
                       <Download size={12} /> PDF
                     </a>
                   </td>
-                  <td>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => navigate(`/inspections/${item.id}`)}
-                      style={{ padding: '4px 10px', fontSize: '12px' }}
-                    >
-                      View <ArrowRight size={12} />
-                    </button>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => navigate(`/inspections/${item.id}`)}
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                      >
+                        View <ArrowRight size={12} />
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => navigate(`/map?focus=${item.id}`)}
+                        title="View on Compliance Map"
+                        style={{ padding: '4px 8px', fontSize: '11px' }}
+                      >
+                        <MapPin size={12} color="#6366f1" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
