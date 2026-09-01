@@ -141,11 +141,82 @@ export async function scanDemoProduct(productId: string): Promise<any> {
   };
 }
 
+// Demo fallback result for when a real image is uploaded but backend is unreachable
+function buildOfflineScanResult(files: File[]): any {
+  const inspectionId = 'MLX-OFFLINE-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+  return {
+    inspection_id: inspectionId,
+    product_name: files[0]?.name?.replace(/\.[^.]+$/, '') || 'Uploaded Product',
+    overall_status: 'NEEDS_REVIEW',
+    compliance_score: 0,
+    severity_score: 0,
+    risk_level: 'unknown',
+    risk_label: 'Demo Mode',
+    is_demo: true,
+    offline_mode: true,
+    total_checks: 0,
+    passed: 0,
+    failed: 0,
+    needs_review: 1,
+    fields: [],
+    violations: [],
+    barcode_data: null,
+    _notice: 'Backend is offline. This is a placeholder result. Run the Python backend locally or deploy it to see real OCR analysis.',
+  };
+}
+
 export async function scanUploadedImages(
   files: File[],
   coords?: { latitude?: number; longitude?: number },
   languages?: string[]
 ): Promise<any> {
+  // If no API base configured (empty VITE_API_URL) or running on Vercel with no backend,
+  // return an offline demo result immediately so the UI doesn't crash.
+  if (!API_BASE || API_BASE === 'http://localhost:8000') {
+    // Still try the real backend in case it's running locally
+    try {
+      const formData = new FormData();
+      files.forEach((f) => formData.append('files', f));
+
+      const params = new URLSearchParams();
+      if (coords?.latitude && coords?.longitude) {
+        params.append('latitude', coords.latitude.toString());
+        params.append('longitude', coords.longitude.toString());
+      }
+      if (languages && languages.length > 0) {
+        params.append('languages', languages.join(','));
+      }
+
+      const queryStr = params.toString() ? `?${params.toString()}` : '';
+      const url = `${API_BASE || 'http://localhost:8000'}/api/scan${queryStr}`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+
+      const res = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({
+          detail: 'Failed to scan image(s). Ensure Python backend is running at ' + (API_BASE || 'http://localhost:8000'),
+        }));
+        throw new Error(err.detail || 'Scanning failed');
+      }
+      return await res.json();
+    } catch (err: any) {
+      // Backend unreachable (network error, timeout, CORS) — fall back to demo result
+      if (err.name === 'AbortError' || err.name === 'TypeError' || err.message?.includes('fetch')) {
+        return buildOfflineScanResult(files);
+      }
+      throw err;
+    }
+  }
+
+  // Custom backend URL is configured — use it directly
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
 
