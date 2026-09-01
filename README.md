@@ -1,5 +1,5 @@
 # ⚖️ MetaLex — Legal Metrology Compliance Checking System
-> **Smart India Hackathon (SIH) 36-Hour Working Prototype**
+> **Smart India Hackathon (SIH) 36-Hour Working Prototype**  
 > Automated compliance verification of packaged commodities under Legal Metrology (Packaged Commodities) Rules, 2011 by scanning products, images, and labels.
 
 ---
@@ -46,13 +46,69 @@ npm run dev
 
 ---
 
-## 🔑 3. Test Credentials
-* **Authentication:** Frictionless inspection mode enabled for hackathon demo. No login required.
-* **Role Simulation:** Officer-level enforcement & review permissions active by default.
+## 🔑 3. User Authentication & Demo Account
+
+### Default Demo Account:
+* **Username:** `demo_officer`
+* **Password:** `demo123`
+* **Role:** `officer`
+
+### Create New User:
+On the login page, click "Create Account" and register with:
+- Username (unique)
+- Email (unique)
+- Password (min 6 characters)
+- Full Name
+
+### Features:
+- ✅ Secure password hashing (bcrypt)
+- ✅ JWT token-based authentication
+- ✅ User-specific inspection history
+- ✅ Role-based access (officer/admin)
+- ✅ Each scan automatically linked to logged-in user
 
 ---
 
-## 📂 4. Project Structure
+## 🗄️ 4. Database & User Management
+
+### Database:
+- **Type:** SQLite (file-based, zero configuration)
+- **Location:** `metalex.db` in project root
+- **Features:**
+  - User accounts with secure password hashing
+  - Inspection history with user tracking
+  - OCR results and compliance violations
+  - Officer review actions and audit trail
+
+### Tables:
+- `users` - User accounts (username, email, password, role)
+- `inspections` - Scan history linked to users
+- `extracted_fields` - OCR detection results
+- `violations` - Compliance issues per inspection
+- `review_actions` - Officer review decisions
+
+### User Features:
+- ✅ Registration & login system
+- ✅ Each inspection linked to performing officer
+- ✅ Personal inspection history per user
+- ✅ Role-based access control (officer/admin)
+- ✅ Secure JWT authentication
+- ✅ Password hashing with bcrypt
+
+### API Endpoints:
+- `POST /api/auth/register` - Create new user
+- `POST /api/auth/login` - User login (returns JWT token)
+- `GET /api/auth/me` - Get current user profile
+- `GET /api/auth/my-inspections` - Get user's inspection history
+
+### Production Ready:
+- Easy migration to PostgreSQL (change `DATABASE_URL` in `.env`)
+- Schema designed for enterprise deployment
+- Supports thousands of users and inspections
+
+---
+
+## 📂 5. Project Structure
 ```
 metalex/
 ├── backend/

@@ -106,3 +106,31 @@ export interface DemoProduct {
   description: string;
   is_compliant: boolean | null;
 }
+
+// ─── Auth ───────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  full_name: string;
+  role: 'officer' | 'admin';
+}
+
+export interface AuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+}
+
+export interface LoginCredentials {
+  username: string;
+  password: string;
+}
+
+export interface RegisterCredentials {
+  username: string;
+  email: string;
+  password: string;
+  full_name?: string;
+}

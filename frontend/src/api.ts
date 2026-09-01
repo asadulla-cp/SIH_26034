@@ -1,4 +1,4 @@
-import type { DashboardStats, DemoProduct, Inspection, Rule } from './types';
+import type { DashboardStats, DemoProduct, Inspection, Rule, AuthTokenResponse, LoginCredentials, RegisterCredentials } from './types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -217,4 +217,47 @@ export async function submitReviewAction(
     // Fallback ok
   }
   return { status: 'ok', message: 'Review saved locally.' };
+}
+
+// ─── Auth API ────────────────────────────────────────────────────────────────
+
+export async function loginUser(creds: LoginCredentials): Promise<AuthTokenResponse> {
+  // OAuth2PasswordRequestForm requires application/x-www-form-urlencoded
+  const body = new URLSearchParams();
+  body.append('username', creds.username);
+  body.append('password', creds.password);
+
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Login failed.' }));
+    throw new Error(err.detail || 'Login failed.');
+  }
+  return res.json();
+}
+
+export async function registerUser(creds: RegisterCredentials): Promise<AuthTokenResponse> {
+  const res = await fetch(`${API_BASE}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(creds),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Registration failed.' }));
+    throw new Error(err.detail || 'Registration failed.');
+  }
+  return res.json();
+}
+
+export async function fetchCurrentUser(token: string): Promise<AuthTokenResponse['user']> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Session expired.');
+  return res.json();
 }

@@ -22,10 +22,12 @@ load_dotenv()
 import cv2
 import numpy as np
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
 
 # Add project root to path
@@ -34,7 +36,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.database import get_db, init_db, SessionLocal
 from backend.models.db_models import (
-    Inspection, ExtractedField, Violation, ReviewAction, RuleRecord
+    Inspection, ExtractedField, Violation, ReviewAction, RuleRecord, User
+)
+from backend.auth import (
+    hash_password, authenticate_user, create_access_token,
+    get_current_active_user, get_user_by_username, get_user_by_email
 )
 from backend.services.ocr_pipeline import (
     process_multiple_images,
@@ -49,6 +55,7 @@ from backend.services.ocr_pipeline import (
 )
 from backend.services.demo_service import get_demo_products, get_demo_product
 from backend.services.report_service import generate_report
+from backend.services.commodity_detector import detect_commodity_category
 from rules.rule_engine import get_rule_engine
 
 # Gemini pipeline — optional, activated by GEMINI_API_KEY env var
@@ -62,8 +69,15 @@ if os.environ.get("GEMINI_API_KEY") and os.environ.get("GEMINI_API_KEY") != "you
         logging.getLogger("metalex").warning(f"Gemini pipeline failed to load: {_ge}")
 
 # Logging
-logging.basicConfig(level=logging.INFO)
+# Set to DEBUG for detailed inspection logs, INFO for production
+DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
+logging.basicConfig(
+    level=logging.DEBUG if DEBUG_MODE else logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger("metalex")
+if DEBUG_MODE:
+    logger.info("🐛 DEBUG MODE ENABLED - Verbose logging active")
 
 # Directories
 UPLOAD_DIR = PROJECT_ROOT / "uploads"
@@ -137,11 +151,159 @@ async def health():
     }
 
 
+# ────────────────────────────────── Auth ───────────────────────────────────────
+
+class RegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: str = ""
+
+    @field_validator("username")
+    @classmethod
+    def username_valid(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Username must be at least 3 characters.")
+        if not v.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("Username may only contain letters, numbers, _ and -.")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_valid(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters.")
+        return v
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: dict
+
+
+@app.post("/api/auth/register", response_model=TokenResponse, tags=["auth"])
+def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    """Create a new officer account and return a JWT."""
+    if get_user_by_username(db, req.username):
+        raise HTTPException(status_code=400, detail="Username already taken.")
+    if get_user_by_email(db, req.email):
+        raise HTTPException(status_code=400, detail="Email already registered.")
+
+    user = User(
+        username=req.username,
+        email=req.email,
+        full_name=req.full_name or req.username,
+        hashed_password=hash_password(req.password),
+        role="officer",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_access_token({"sub": user.username})
+    return TokenResponse(
+        access_token=token,
+        user={"id": user.id, "username": user.username, "email": user.email,
+              "full_name": user.full_name, "role": user.role},
+    )
+
+
+@app.post("/api/auth/login", response_model=TokenResponse, tags=["auth"])
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    """Log in with username + password, return a JWT."""
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # update last_login
+    user.last_login = datetime.datetime.now(datetime.timezone.utc)
+    db.commit()
+
+    token = create_access_token({"sub": user.username})
+    return TokenResponse(
+        access_token=token,
+        user={"id": user.id, "username": user.username, "email": user.email,
+              "full_name": user.full_name, "role": user.role},
+    )
+
+
+@app.get("/api/auth/me", tags=["auth"])
+def me(current_user: User = Depends(get_current_active_user)):
+    """Return the currently authenticated user's profile."""
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "role": current_user.role,
+    }
+
+
+@app.get("/api/auth/my-inspections", tags=["auth"])
+async def get_my_inspections(
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Get inspections performed by the currently logged-in user."""
+    try:
+        query = db.query(Inspection)\
+            .filter(Inspection.user_id == current_user.id)\
+            .order_by(Inspection.created_at.desc())
+
+        if status:
+            query = query.filter(Inspection.overall_status == status.upper())
+        if search:
+            query = query.filter(
+                Inspection.product_name.ilike(f"%{search}%") |
+                Inspection.inspection_id.ilike(f"%{search}%")
+            )
+
+        total = query.count()
+        inspections = query.offset(offset).limit(limit).all()
+
+        return {
+            "total": total,
+            "inspections": [
+                {
+                    "id": i.id,
+                    "inspection_id": i.inspection_id,
+                    "product_name": i.product_name,
+                    "overall_status": i.overall_status,
+                    "compliance_score": i.compliance_score,
+                    "total_fields": i.total_fields,
+                    "passed_fields": i.passed_fields,
+                    "failed_fields": i.failed_fields,
+                    "review_fields": i.review_fields,
+                    "created_at": i.created_at.isoformat() if i.created_at else None,
+                    "violation_count": len(i.violations),
+                }
+                for i in inspections
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Get my inspections failed: {e}")
+        raise HTTPException(500, "Failed to load user inspections")
+
+
 # ────────────────────────────────── Multi-Image Scan ──────────────────────────
 @app.post("/api/scan")
 async def scan_product(
     files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(lambda: None)  # Optional: user if logged in
 ):
     """
     Multi-image Legal Metrology Scan (1 to 5 package angle photos).
@@ -228,6 +390,19 @@ async def scan_product(
         if pn.get("value"):
             product_name = pn["value"]
 
+        # ── Auto-detect commodity category ──────────────────────────────────────
+        # Combine all OCR text for better detection
+        all_ocr_text = " ".join([
+            str(fdata.get("source_text", "")) for fdata in fused_fields.values()
+        ])
+        commodity_result = detect_commodity_category(
+            ocr_text=all_ocr_text,
+            product_name=product_name,
+            extra_hint=""
+        )
+        logger.info(f"Commodity detection: {commodity_result.get('category')} "
+                   f"(confidence: {commodity_result.get('confidence')})")
+
         # ── Save inspection to DB ──────────────────────────────────────────────
         primary_image = saved_image_paths[0] if saved_image_paths else None
         primary_annotated = saved_annotated_paths[0] if saved_annotated_paths else None
@@ -248,6 +423,10 @@ async def scan_product(
             image_quality_issues=multi_result.get("quality", {}).get("issues", []),
             ocr_engine=multi_result.get("ocr_engine", "easyocr_multipass_v2"),
             processing_time_ms=processing_time,
+            commodity_category=commodity_result.get("category"),
+            commodity_confidence=commodity_result.get("confidence"),
+            commodity_detection_meta=commodity_result,
+            user_id=current_user.id if current_user else None,  # Track user if logged in
         )
         db.add(inspection)
         db.flush()
@@ -441,6 +620,16 @@ async def scan_demo_product(product_id: str, db: Session = Depends(get_db)):
 
         product_name = demo["name"]
 
+        # ── Auto-detect commodity category for demo ─────────────────────────────
+        all_ocr_text = " ".join([
+            str(fdata.get("source_text", "")) for fdata in fields.values()
+        ])
+        commodity_result = detect_commodity_category(
+            ocr_text=all_ocr_text,
+            product_name=product_name,
+            extra_hint=""
+        )
+
         inspection = Inspection(
             inspection_id=inspection_id,
             product_name=product_name,
@@ -457,6 +646,9 @@ async def scan_demo_product(product_id: str, db: Session = Depends(get_db)):
             image_quality_issues=[],
             ocr_engine="demo",
             processing_time_ms=150,
+            commodity_category=commodity_result.get("category"),
+            commodity_confidence=commodity_result.get("confidence"),
+            commodity_detection_meta=commodity_result,
         )
         db.add(inspection)
         db.flush()

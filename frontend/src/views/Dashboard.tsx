@@ -9,19 +9,30 @@ import {
   TrendingUp,
   Scan,
   Database,
-  Clock
+  Clock,
+  BookOpen,
+  Scale,
+  AlertCircle,
+  CheckCircle2,
+  Info
 } from 'lucide-react';
-import { getDashboardStats } from '../api';
-import type { DashboardStats } from '../types';
+import { getDashboardStats, getRules } from '../api';
+import type { DashboardStats, Rule } from '../types';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [ruleSetVersion, setRuleSetVersion] = useState('');
 
   useEffect(() => {
     fetchStats();
+    getRules().then((r) => {
+      setRules(r.rules);
+      setRuleSetVersion(r.rule_set_version);
+    }).catch(() => {});
   }, []);
 
   const fetchStats = async () => {
@@ -41,6 +52,22 @@ export const Dashboard: React.FC = () => {
   const compliantRate = stats && stats.total_inspections > 0
     ? Math.round((stats.compliant / stats.total_inspections) * 100)
     : 0;
+
+  // Rules summary stats
+  const highRules = rules.filter(r => r.severity === 'high');
+  const medRules = rules.filter(r => r.severity === 'medium');
+  const lowRules = rules.filter(r => r.severity === 'low');
+
+  // Group rules by category for quick reference
+  const mandatoryRules = rules.filter(r =>
+    (r as any).category === 'mandatory_declarations' || ['LM-PC-001','LM-PC-002','LM-PC-005','LM-PC-006','LM-PC-007'].includes(r.rule_id)
+  );
+  const qtyRules = rules.filter(r =>
+    (r as any).category === 'quantity_measurement' || ['LM-PC-003','LM-PC-008','LM-PC-010','LM-PC-011','LM-PC-012'].includes(r.rule_id)
+  );
+  const mrpRules = rules.filter(r =>
+    (r as any).category === 'mrp_pricing' || ['LM-PC-004','LM-PC-009','LM-PC-014','LM-PC-015','LM-PC-022'].includes(r.rule_id)
+  );
 
   return (
     <div className="animate-in">
@@ -162,6 +189,138 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* ── Rules Summary Panel ─────────────────────────────────────── */}
+      {rules.length > 0 && (
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Scale size={18} color="var(--accent-primary)" />
+              Active Rulebook — SIH26034 v{ruleSetVersion}
+            </h3>
+            <button
+              onClick={() => navigate('/rules')}
+              style={{
+                background: 'none', border: 'none', color: 'var(--accent-primary-hover)',
+                fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '4px'
+              }}
+            >
+              Full Library <ArrowRight size={14} />
+            </button>
+          </div>
+
+          {/* Severity count badges */}
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '18px', flexWrap: 'wrap' }}>
+            <div style={{
+              flex: 1, minWidth: '120px', padding: '14px 16px',
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+              borderRadius: 'var(--radius-md)', textAlign: 'center'
+            }}>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: '#ef4444', lineHeight: 1 }}>{highRules.length}</div>
+              <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px', fontWeight: 600 }}>HIGH SEVERITY</div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>Fine up to ₹25,000</div>
+            </div>
+            <div style={{
+              flex: 1, minWidth: '120px', padding: '14px 16px',
+              background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+              borderRadius: 'var(--radius-md)', textAlign: 'center'
+            }}>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: '#f59e0b', lineHeight: 1 }}>{medRules.length}</div>
+              <div style={{ fontSize: '11px', color: '#f59e0b', marginTop: '4px', fontWeight: 600 }}>MEDIUM SEVERITY</div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>Fine ₹2,000–₹4,000</div>
+            </div>
+            <div style={{
+              flex: 1, minWidth: '120px', padding: '14px 16px',
+              background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.25)',
+              borderRadius: 'var(--radius-md)', textAlign: 'center'
+            }}>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: '#06b6d4', lineHeight: 1 }}>{lowRules.length}</div>
+              <div style={{ fontSize: '11px', color: '#06b6d4', marginTop: '4px', fontWeight: 600 }}>LOW SEVERITY</div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>Informational</div>
+            </div>
+            <div style={{
+              flex: 1, minWidth: '120px', padding: '14px 16px',
+              background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)',
+              borderRadius: 'var(--radius-md)', textAlign: 'center'
+            }}>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--accent-primary)', lineHeight: 1 }}>{rules.length}</div>
+              <div style={{ fontSize: '11px', color: 'var(--accent-primary)', marginTop: '4px', fontWeight: 600 }}>TOTAL RULES</div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>LM-PC-001 to 022</div>
+            </div>
+          </div>
+
+          {/* Quick reference: 3 rule group columns */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+            {/* Mandatory Declarations */}
+            <div style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', padding: '12px 14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <BookOpen size={11} /> Mandatory Declarations
+              </div>
+              {mandatoryRules.slice(0, 5).map(r => (
+                <div key={r.rule_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
+                  <span style={{
+                    width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0,
+                    background: r.severity === 'high' ? '#ef4444' : r.severity === 'medium' ? '#f59e0b' : '#06b6d4'
+                  }} />
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{r.rule_id}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title.replace(' Declaration', '').replace('Manufacturer / Packer / Importer', 'Mfr/Packer Name')}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Quantity & Measurement */}
+            <div style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', padding: '12px 14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={11} /> Quantity & Units
+              </div>
+              {qtyRules.slice(0, 5).map(r => (
+                <div key={r.rule_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
+                  <span style={{
+                    width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0,
+                    background: r.severity === 'high' ? '#ef4444' : r.severity === 'medium' ? '#f59e0b' : '#06b6d4'
+                  }} />
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{r.rule_id}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title.replace(' Declaration', '').replace('Net Quantity — ', '').replace('Net Quantity', 'Net Qty')}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* MRP & Pricing */}
+            <div style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', padding: '12px 14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertCircle size={11} /> MRP & Pricing
+              </div>
+              {mrpRules.slice(0, 5).map(r => (
+                <div key={r.rule_id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
+                  <span style={{
+                    width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0,
+                    background: r.severity === 'high' ? '#ef4444' : r.severity === 'medium' ? '#f59e0b' : '#06b6d4'
+                  }} />
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{r.rule_id}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title.replace('MRP Declaration', 'MRP Wording').replace('MRP — ', '').replace('MRP ', '')}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Amendment notice */}
+          <div style={{
+            marginTop: '14px', padding: '10px 14px',
+            background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)',
+            borderRadius: 'var(--radius-sm)', display: 'flex', gap: '8px', alignItems: 'flex-start'
+          }}>
+            <Info size={13} color="#f59e0b" style={{ flexShrink: 0, marginTop: '1px' }} />
+            <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              <strong style={{ color: '#f59e0b' }}>Latest amendments applied:</strong>{' '}
+              Pan masala micro-package exemption removed (GSR 881(E), effective 01.02.2026) ·
+              Medical device font/PDP rules superseded by Medical Devices Rules 2017 (Oct 2025) ·
+              Rule 6(10A) e-commerce country-of-origin filter (effective 01.07.2027 — not yet in force).
+              Verify all amendment wording against egazette.gov.in before production enforcement.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Middle Grid: Recent Inspections & Common Violations */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px', marginBottom: '24px' }}>

@@ -498,7 +498,7 @@ class ManufacturerDetector(BaseDetector):
             if any(re.search(p, text) for p in self.kws):
                 # Extract the entity name roughly
                 clean = block["text"]
-                clean = re.sub(r"^(.*?)(?i)(?:manufactured\s*(?:by|&)?|marketed\s*by|packed\s*by)\s*[:\-]*\s*", "", clean)
+                clean = re.sub(r"(?i)^(.*?)(?:manufactured\s*(?:by|&)?|marketed\s*by|packed\s*by)\s*[:\-]*\s*", "", clean)
                 # Take first line of the remaining block as manufacturer
                 lines = clean.split(" ")
                 val = " ".join(lines[:4]) # Heuristic

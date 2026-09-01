@@ -40,9 +40,18 @@ class Inspection(Base):
     image_quality_issues = Column(JSON, nullable=True)
     ocr_engine = Column(String, default="easyocr")
     processing_time_ms = Column(Integer, nullable=True)
+    commodity_category = Column(String, nullable=True)  # Auto-detected category (tea, coffee, soap, etc.)
+    commodity_confidence = Column(Float, nullable=True)  # Detection confidence 0.0-1.0
+    commodity_detection_meta = Column(JSON, nullable=True)  # Full detection result metadata
+    
+    # User tracking - links inspection to officer who performed it
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)  # Nullable for backward compatibility
+    
     created_at = Column(DateTime, default=now_utc)
     updated_at = Column(DateTime, default=now_utc, onupdate=now_utc)
 
+    # Relationships
+    performed_by = relationship("User", back_populates="inspections")
     extracted_fields = relationship("ExtractedField", back_populates="inspection", cascade="all, delete-orphan")
     violations = relationship("Violation", back_populates="inspection", cascade="all, delete-orphan")
     review_actions = relationship("ReviewAction", back_populates="inspection", cascade="all, delete-orphan")
@@ -121,3 +130,21 @@ class RuleRecord(Base):
     is_prototype = Column(Boolean, default=True)
     source_reference = Column(Text, nullable=True)
     created_at = Column(DateTime, default=now_utc)
+
+
+class User(Base):
+    """User account for MetaLex enforcement officers."""
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    username = Column(String, unique=True, nullable=False, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    full_name = Column(String, nullable=True)
+    hashed_password = Column(String, nullable=False)
+    role = Column(String, default="officer")        # officer / admin
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=now_utc)
+    last_login = Column(DateTime, nullable=True)
+    
+    # Relationship: all inspections performed by this user
+    inspections = relationship("Inspection", back_populates="performed_by")
