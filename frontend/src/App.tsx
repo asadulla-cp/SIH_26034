@@ -10,7 +10,6 @@ import {
   Shield,
   Menu,
   X,
-  LogOut,
   User as UserIcon,
   Package,
   Globe,
@@ -26,7 +25,7 @@ import { InspectionHistory } from './views/InspectionHistory';
 import { InspectionDetail } from './views/InspectionDetail';
 import { RuleLibrary } from './views/RuleLibrary';
 import { Settings } from './views/Settings';
-import { Login } from './Login';
+// Login import removed — auth bypassed for demo
 import { AuthProvider, useAuth } from './AuthContext';
 import { PwaInstall } from './pwa-install';
 import { checkHealth } from './api';
@@ -44,7 +43,7 @@ const SidebarLayout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [isNetworkOnline, setIsNetworkOnline] = useState(navigator.onLine);
   const [offlineQueuedCount, setOfflineQueuedCount] = useState(0);
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
 
   useEffect(() => {
     setMobileMenuOpen(false);
