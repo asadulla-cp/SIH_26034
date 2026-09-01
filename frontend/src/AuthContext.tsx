@@ -45,7 +45,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
 
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
     fetch(`${API_BASE}/api/auth/me`, {
       headers: { Authorization: `Bearer ${stored}` },

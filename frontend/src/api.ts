@@ -9,7 +9,10 @@ import type {
   RegisterCredentials
 } from './types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// When VITE_API_URL is empty (production on Render — frontend served by the
+// same FastAPI process), use an empty string so all fetch() calls go to the
+// same origin automatically. Fall back to localhost only in local dev.
+const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 // Fallback client-side demo datasets for standalone Vercel preview
 const FALLBACK_DEMO_PRODUCTS: DemoProduct[] = [
@@ -170,53 +173,6 @@ export async function scanUploadedImages(
   coords?: { latitude?: number; longitude?: number },
   languages?: string[]
 ): Promise<any> {
-  // If no API base configured (empty VITE_API_URL) or running on Vercel with no backend,
-  // return an offline demo result immediately so the UI doesn't crash.
-  if (!API_BASE || API_BASE === 'http://localhost:8000') {
-    // Still try the real backend in case it's running locally
-    try {
-      const formData = new FormData();
-      files.forEach((f) => formData.append('files', f));
-
-      const params = new URLSearchParams();
-      if (coords?.latitude && coords?.longitude) {
-        params.append('latitude', coords.latitude.toString());
-        params.append('longitude', coords.longitude.toString());
-      }
-      if (languages && languages.length > 0) {
-        params.append('languages', languages.join(','));
-      }
-
-      const queryStr = params.toString() ? `?${params.toString()}` : '';
-      const url = `${API_BASE || 'http://localhost:8000'}/api/scan${queryStr}`;
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
-
-      const res = await fetch(url, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({
-          detail: 'Failed to scan image(s). Ensure Python backend is running at ' + (API_BASE || 'http://localhost:8000'),
-        }));
-        throw new Error(err.detail || 'Scanning failed');
-      }
-      return await res.json();
-    } catch (err: any) {
-      // Backend unreachable (network error, timeout, CORS) — fall back to demo result
-      if (err.name === 'AbortError' || err.name === 'TypeError' || err.message?.includes('fetch')) {
-        return buildOfflineScanResult(files);
-      }
-      throw err;
-    }
-  }
-
-  // Custom backend URL is configured — use it directly
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
 
@@ -232,18 +188,37 @@ export async function scanUploadedImages(
   const queryStr = params.toString() ? `?${params.toString()}` : '';
   const url = `${API_BASE}/api/scan${queryStr}`;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    body: formData,
-  });
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000); // 60s for OCR
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({
-      detail: 'Failed to scan image(s). Ensure Python backend is running at ' + API_BASE,
-    }));
-    throw new Error(err.detail || 'Scanning failed');
+    const res = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({
+        detail: `Failed to scan image(s). Ensure Python backend is running.`,
+      }));
+      throw new Error(err.detail || 'Scanning failed');
+    }
+    return await res.json();
+  } catch (err: any) {
+    // If the backend is simply unreachable (no backend deployed, CORS, network),
+    // return a placeholder result so the UI doesn't crash.
+    if (
+      err.name === 'AbortError' ||
+      err.name === 'TypeError' ||
+      err.message?.toLowerCase().includes('fetch') ||
+      err.message?.toLowerCase().includes('network')
+    ) {
+      return buildOfflineScanResult(files);
+    }
+    throw err;
   }
-  return await res.json();
 }
 
 export async function scanUploadedImage(
