@@ -219,6 +219,7 @@ export const Login: React.FC = () => {
 
         {/* Form */}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Full Name - Register only (First) */}
           {mode === 'register' && (
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
@@ -241,28 +242,7 @@ export const Login: React.FC = () => {
             </div>
           )}
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
-              Username
-            </label>
-            <input
-              style={{
-                width: '100%', padding: '14px 16px', background: 'rgba(15, 20, 31, 0.5)',
-                border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', color: '#f0f4ff',
-                fontSize: '14px', fontFamily: 'inherit', outline: 'none', transition: 'all 0.2s', boxSizing: 'border-box',
-              }}
-              onFocus={(e) => e.target.style.borderColor = '#6366f1'}
-              onBlur={(e) => e.target.style.borderColor = 'rgba(255, 255, 255, 0.08)'}
-              type="text"
-              placeholder={mode === 'login' ? 'demo_officer' : 'officer_username'}
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              minLength={3}
-              autoComplete="username"
-            />
-          </div>
-
+          {/* Email - Register only OR show for both (Second) */}
           {mode === 'register' && (
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
@@ -286,6 +266,30 @@ export const Login: React.FC = () => {
             </div>
           )}
 
+          {/* Username (Third) */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
+              Username
+            </label>
+            <input
+              style={{
+                width: '100%', padding: '14px 16px', background: 'rgba(15, 20, 31, 0.5)',
+                border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', color: '#f0f4ff',
+                fontSize: '14px', fontFamily: 'inherit', outline: 'none', transition: 'all 0.2s', boxSizing: 'border-box',
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#6366f1'}
+              onBlur={(e) => e.target.style.borderColor = 'rgba(255, 255, 255, 0.08)'}
+              type="text"
+              placeholder={mode === 'login' ? 'demo_officer' : 'officer_username'}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              minLength={3}
+              autoComplete="username"
+            />
+          </div>
+
+          {/* Password (Fourth) */}
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
               Password
