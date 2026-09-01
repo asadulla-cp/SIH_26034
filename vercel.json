@@ -1,12 +1,14 @@
 {
-  "framework": null,
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "echo skip",
+  "framework": "vite",
+  "env": {
+    "VITE_API_URL": "https://metalex-backend.onrender.com"
+  },
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/index.html"
+      "destination": "/"
     }
   ]
 }

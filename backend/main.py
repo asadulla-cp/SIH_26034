@@ -176,6 +176,10 @@ app.add_middleware(
 
 
 # ────────────────────────────────── Health ─────────────────────────────────────
+@app.get("/health")
+async def health_root():
+    return {"status": "ok"}
+
 @app.get("/api/health")
 async def health():
     return {
