@@ -1,0 +1,536 @@
+[
+  {
+    "id": "sample-compliant",
+    "title": "Fully compliant atta pack",
+    "scenario": "All commonly mapped declarations present",
+    "demo": true,
+    "image": "demo/images/sample-compliant.png",
+    "fields": {
+      "product_name": "Whole Wheat Atta",
+      "manufacturer": "Kisan Harvest Foods Pvt Ltd",
+      "address": "Plot 14, MIDC, Nashik, Maharashtra 422010",
+      "net_quantity": "5 kg",
+      "unit": "kg",
+      "mrp": "\u20b9249.00",
+      "mfg_date": "PKD: Jul 2026",
+      "consumer_care": "Care: 1800-208-1234 | care@kisanharvest.in",
+      "country_of_origin": "India"
+    },
+    "imported": false,
+    "ocr_lines": [
+      {
+        "text": "Whole Wheat Atta",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2173076923076923,
+          "w": 0.2125,
+          "h": 0.0125
+        },
+        "field_hint": "product_name"
+      },
+      {
+        "text": "Kisan Harvest Foods Pvt Ltd",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2923076923076923,
+          "w": 0.3402777777777778,
+          "h": 0.0125
+        },
+        "field_hint": "manufacturer"
+      },
+      {
+        "text": "Plot 14, MIDC, Nashik, Maharashtra 422010",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.36730769230769234,
+          "w": 0.5083333333333333,
+          "h": 0.015384615384615385
+        },
+        "field_hint": "address"
+      },
+      {
+        "text": "5 kg",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.4423076923076923,
+          "w": 0.05,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "net_quantity"
+      },
+      {
+        "text": "kg",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.5173076923076924,
+          "w": 0.029166666666666667,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "unit"
+      },
+      {
+        "text": "\u20b9249.00",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.5923076923076923,
+          "w": 0.09583333333333334,
+          "h": 0.0125
+        },
+        "field_hint": "mrp"
+      },
+      {
+        "text": "PKD: Jul 2026",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.6673076923076923,
+          "w": 0.16666666666666666,
+          "h": 0.0125
+        },
+        "field_hint": "mfg_date"
+      },
+      {
+        "text": "Care: 1800-208-1234 | care@kisanharvest.in",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.7423076923076923,
+          "w": 0.5194444444444445,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "consumer_care"
+      },
+      {
+        "text": "India",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.8173076923076923,
+          "w": 0.058333333333333334,
+          "h": 0.0125
+        },
+        "field_hint": "country_of_origin"
+      }
+    ],
+    "image_quality": 0.91,
+    "notes": ""
+  },
+  {
+    "id": "sample-missing-mrp",
+    "title": "Missing MRP",
+    "scenario": "Net quantity present; MRP not printed",
+    "demo": true,
+    "image": "demo/images/sample-missing-mrp.png",
+    "fields": {
+      "product_name": "Refined Sunflower Oil",
+      "manufacturer": "Kisan Harvest Foods Pvt Ltd",
+      "address": "Plot 14, MIDC, Nashik, Maharashtra 422010",
+      "net_quantity": "1 L",
+      "unit": "L",
+      "mrp": null,
+      "mfg_date": "PKD: Jul 2026",
+      "consumer_care": "Care: 1800-208-1234 | care@kisanharvest.in",
+      "country_of_origin": "India"
+    },
+    "imported": false,
+    "ocr_lines": [
+      {
+        "text": "Refined Sunflower Oil",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2173076923076923,
+          "w": 0.25972222222222224,
+          "h": 0.0125
+        },
+        "field_hint": "product_name"
+      },
+      {
+        "text": "Kisan Harvest Foods Pvt Ltd",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2923076923076923,
+          "w": 0.3402777777777778,
+          "h": 0.0125
+        },
+        "field_hint": "manufacturer"
+      },
+      {
+        "text": "Plot 14, MIDC, Nashik, Maharashtra 422010",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.36730769230769234,
+          "w": 0.5083333333333333,
+          "h": 0.015384615384615385
+        },
+        "field_hint": "address"
+      },
+      {
+        "text": "1 L",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.4423076923076923,
+          "w": 0.03611111111111111,
+          "h": 0.0125
+        },
+        "field_hint": "net_quantity"
+      },
+      {
+        "text": "L",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.5173076923076924,
+          "w": 0.015277777777777777,
+          "h": 0.0125
+        },
+        "field_hint": "unit"
+      },
+      {
+        "text": "PKD: Jul 2026",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.5923076923076923,
+          "w": 0.16666666666666666,
+          "h": 0.0125
+        },
+        "field_hint": "mfg_date"
+      },
+      {
+        "text": "Care: 1800-208-1234 | care@kisanharvest.in",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.6673076923076923,
+          "w": 0.5194444444444445,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "consumer_care"
+      },
+      {
+        "text": "India",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.7423076923076923,
+          "w": 0.058333333333333334,
+          "h": 0.0125
+        },
+        "field_hint": "country_of_origin"
+      }
+    ],
+    "image_quality": 0.91,
+    "notes": ""
+  },
+  {
+    "id": "sample-missing-care",
+    "title": "Missing consumer care",
+    "scenario": "Consumer care / complaint contact omitted",
+    "demo": true,
+    "image": "demo/images/sample-missing-care.png",
+    "fields": {
+      "product_name": "Iodised Crystal Salt",
+      "manufacturer": "Kisan Harvest Foods Pvt Ltd",
+      "address": "Plot 14, MIDC, Nashik, Maharashtra 422010",
+      "net_quantity": "1 kg",
+      "unit": "kg",
+      "mrp": "\u20b9249.00",
+      "mfg_date": "PKD: Jul 2026",
+      "consumer_care": null,
+      "country_of_origin": "India"
+    },
+    "imported": false,
+    "ocr_lines": [
+      {
+        "text": "Iodised Crystal Salt",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2173076923076923,
+          "w": 0.23194444444444445,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "product_name"
+      },
+      {
+        "text": "Kisan Harvest Foods Pvt Ltd",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2923076923076923,
+          "w": 0.3402777777777778,
+          "h": 0.0125
+        },
+        "field_hint": "manufacturer"
+      },
+      {
+        "text": "Plot 14, MIDC, Nashik, Maharashtra 422010",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.36730769230769234,
+          "w": 0.5083333333333333,
+          "h": 0.015384615384615385
+        },
+        "field_hint": "address"
+      },
+      {
+        "text": "1 kg",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.4423076923076923,
+          "w": 0.05,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "net_quantity"
+      },
+      {
+        "text": "kg",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.5173076923076924,
+          "w": 0.029166666666666667,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "unit"
+      },
+      {
+        "text": "\u20b9249.00",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.5923076923076923,
+          "w": 0.09583333333333334,
+          "h": 0.0125
+        },
+        "field_hint": "mrp"
+      },
+      {
+        "text": "PKD: Jul 2026",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.6673076923076923,
+          "w": 0.16666666666666666,
+          "h": 0.0125
+        },
+        "field_hint": "mfg_date"
+      },
+      {
+        "text": "India",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.7423076923076923,
+          "w": 0.058333333333333334,
+          "h": 0.0125
+        },
+        "field_hint": "country_of_origin"
+      }
+    ],
+    "image_quality": 0.91,
+    "notes": ""
+  },
+  {
+    "id": "sample-poor-ocr",
+    "title": "Poor OCR / ambiguous MRP",
+    "scenario": "Low contrast label; MRP may read as I99 instead of 199",
+    "demo": true,
+    "image": "demo/images/sample-poor-ocr.png",
+    "fields": {
+      "product_name": "Instant Coffee Mix",
+      "manufacturer": "Kisan Harvest Foods Pvt Ltd",
+      "address": "Plot 14, MIDC, Nashik, Maharashtra 422010",
+      "net_quantity": "200 g",
+      "unit": "g",
+      "mrp": "\u20b9I99",
+      "mfg_date": "PKD: Jul 2026",
+      "consumer_care": "Care: 1800-208-1234 | care@kisanharvest.in",
+      "country_of_origin": "India"
+    },
+    "imported": false,
+    "ocr_lines": [
+      {
+        "text": "Instant Coffee Mix",
+        "confidence": 0.48,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2173076923076923,
+          "w": 0.2152777777777778,
+          "h": 0.0125
+        },
+        "field_hint": "product_name"
+      },
+      {
+        "text": "Kisan Harvest Foods Pvt Ltd",
+        "confidence": 0.48,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2923076923076923,
+          "w": 0.3402777777777778,
+          "h": 0.0125
+        },
+        "field_hint": "manufacturer"
+      },
+      {
+        "text": "Plot 14, MIDC, Nashik, Maharashtra 422010",
+        "confidence": 0.48,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.36730769230769234,
+          "w": 0.5083333333333333,
+          "h": 0.015384615384615385
+        },
+        "field_hint": "address"
+      },
+      {
+        "text": "200 g",
+        "confidence": 0.48,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.4423076923076923,
+          "w": 0.06388888888888888,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "net_quantity"
+      },
+      {
+        "text": "g",
+        "confidence": 0.48,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.5201923076923077,
+          "w": 0.015277777777777777,
+          "h": 0.013461538461538462
+        },
+        "field_hint": "unit"
+      },
+      {
+        "text": "MRP Rs I99 incl. taxes",
+        "confidence": 0.41,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.5923076923076923,
+          "w": 0.2638888888888889,
+          "h": 0.0125
+        },
+        "field_hint": "mrp"
+      },
+      {
+        "text": "PKD: Jul 2026",
+        "confidence": 0.48,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.6673076923076923,
+          "w": 0.16666666666666666,
+          "h": 0.0125
+        },
+        "field_hint": "mfg_date"
+      },
+      {
+        "text": "Care: 1800-208-1234 | care@kisanharvest.in",
+        "confidence": 0.48,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.7423076923076923,
+          "w": 0.5194444444444445,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "consumer_care"
+      },
+      {
+        "text": "India",
+        "confidence": 0.48,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.8173076923076923,
+          "w": 0.058333333333333334,
+          "h": 0.0125
+        },
+        "field_hint": "country_of_origin"
+      }
+    ],
+    "image_quality": 0.32,
+    "notes": "Low OCR confidence must yield NEEDS REVIEW, not automatic FAIL.",
+    "ambiguous": true
+  },
+  {
+    "id": "sample-multi-fail",
+    "title": "Multiple violations (imported)",
+    "scenario": "Incomplete address, missing MRP, date, care, origin, unit on imported pasta",
+    "demo": true,
+    "image": "demo/images/sample-multi-fail.png",
+    "fields": {
+      "product_name": "Imported Pasta",
+      "manufacturer": "Blue Bay Traders",
+      "address": "Mumbai",
+      "net_quantity": "500",
+      "unit": null,
+      "mrp": null,
+      "mfg_date": null,
+      "consumer_care": null,
+      "country_of_origin": null
+    },
+    "imported": true,
+    "ocr_lines": [
+      {
+        "text": "Imported Pasta",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2173076923076923,
+          "w": 0.18055555555555555,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "product_name"
+      },
+      {
+        "text": "Blue Bay Traders",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.2923076923076923,
+          "w": 0.20555555555555555,
+          "h": 0.016346153846153847
+        },
+        "field_hint": "manufacturer"
+      },
+      {
+        "text": "Mumbai",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.36730769230769234,
+          "w": 0.09444444444444444,
+          "h": 0.0125
+        },
+        "field_hint": "address"
+      },
+      {
+        "text": "500",
+        "confidence": 0.93,
+        "bbox": {
+          "x": 0.06111111111111111,
+          "y": 0.4423076923076923,
+          "w": 0.041666666666666664,
+          "h": 0.0125
+        },
+        "field_hint": "net_quantity"
+      }
+    ],
+    "image_quality": 0.91,
+    "notes": "Imported indicator without country of origin."
+  }
+]

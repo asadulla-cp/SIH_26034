@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-navy: #0c1424;
+  --color-panel: #141e32;
+  --color-gold: #d4a017;
+  --color-ink: #e8eef8;
+}
+
+html, body, #root { height: 100%; }
+body { background: #0c1424; color: #e8eef8; font-family: var(--font-sans); }

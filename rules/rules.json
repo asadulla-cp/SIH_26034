@@ -1,0 +1,129 @@
+{
+  "pack_id": "LM-PC-2011-PROTOTYPE",
+  "version": "1.0.0",
+  "effective_date": "2011-03-01",
+  "disclaimer": "Prototype mapping of commonly cited packaged-commodity declarations associated with the Legal Metrology (Packaged Commodities) Rules, 2011. This is NOT official legal text and MUST NOT replace notified rules. Official packs can replace this file later.",
+  "status_policy": {
+    "low_confidence_threshold": 0.55,
+    "review_confidence_threshold": 0.72,
+    "poor_image_quality_threshold": 0.4
+  },
+  "scoring": {
+    "start": 100,
+    "deduct_high": 16,
+    "deduct_medium": 9,
+    "deduct_low": 4
+  },
+  "rules": [
+    {
+      "rule_id": "PC-001",
+      "field": "product_name",
+      "description": "Commodity / product identity on the principal display panel.",
+      "requirement": "A common or generic name of the commodity should be present on the package.",
+      "severity": "high",
+      "validation_type": "required_present",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 — prototype mapping (name of commodity)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-002",
+      "field": "manufacturer",
+      "description": "Name of manufacturer, packer or importer.",
+      "requirement": "Name of manufacturer / packer / importer should be declared.",
+      "severity": "high",
+      "validation_type": "required_present",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 — prototype mapping (manufacturer/packer/importer)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-003",
+      "field": "address",
+      "description": "Address of manufacturer, packer or importer.",
+      "requirement": "Complete address enabling identification of the premises should be declared.",
+      "severity": "high",
+      "validation_type": "address_quality",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 — prototype mapping (address)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-004",
+      "field": "net_quantity",
+      "description": "Net quantity declaration with unit.",
+      "requirement": "Net quantity should be declared in terms of standard units of weight, measure or number.",
+      "severity": "high",
+      "validation_type": "net_quantity_with_unit",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 — prototype mapping (net quantity)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-005",
+      "field": "mrp",
+      "description": "Maximum retail price inclusive of all taxes.",
+      "requirement": "MRP (inclusive of all taxes) should be declared in Indian rupees.",
+      "severity": "high",
+      "validation_type": "mrp_format",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 — prototype mapping (MRP)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-006",
+      "field": "mfg_date",
+      "description": "Month and year of manufacture, packing or import.",
+      "requirement": "Month and year of manufacture / packing / import should be declared in a parseable form.",
+      "severity": "high",
+      "validation_type": "date_parseable",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 — prototype mapping (date of manufacture/packing/import)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-007",
+      "field": "consumer_care",
+      "description": "Consumer care / complaint redressal particulars.",
+      "requirement": "Consumer care name and at least one contact channel (telephone and/or email) should be declared.",
+      "severity": "high",
+      "validation_type": "consumer_care_contact",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 (as amended) — prototype mapping (consumer care)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-008",
+      "field": "country_of_origin",
+      "description": "Country of origin for imported packages.",
+      "requirement": "If the package is indicated as imported, country of origin should be declared.",
+      "severity": "medium",
+      "validation_type": "origin_if_imported",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 — prototype mapping (imported packages)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-009",
+      "field": "unit",
+      "description": "Standard unit accompanying net quantity.",
+      "requirement": "Unit should be a recognised standard unit (g, kg, ml, l, number/pcs, etc.).",
+      "severity": "medium",
+      "validation_type": "standard_unit",
+      "version": "1.0.0",
+      "legal_reference": "LM(PC) Rules, 2011 — prototype mapping (standard units)",
+      "demo_simplified": true
+    },
+    {
+      "rule_id": "PC-010",
+      "field": "mrp",
+      "description": "Single unambiguous MRP declaration.",
+      "requirement": "Conflicting or multiple distinct MRP values should be flagged for review.",
+      "severity": "medium",
+      "validation_type": "no_conflicting_mrp",
+      "version": "1.0.0",
+      "legal_reference": "Prototype operational check — not a verbatim statutory clause",
+      "demo_simplified": true
+    }
+  ]
+}
