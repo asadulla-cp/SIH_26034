@@ -1,0 +1,111 @@
+{
+  "ruleset_version": "2011-demo-1.0",
+  "note": "Rule text is a simplified prototype mapping for demonstration purposes only. It is NOT a certified legal text of the Legal Metrology (Packaged Commodities) Rules, 2011 and MUST be verified against the official Gazette notification before any production/legal use.",
+  "rules": [
+    {
+      "rule_id": "LM-PC-001",
+      "title": "Declaration of Product Name",
+      "field": "product_name",
+      "applicability": "all_pre_packaged_commodities",
+      "requirement": "The common or generic name of the commodity must be declared on the package.",
+      "validation_type": "presence",
+      "severity": "high",
+      "rule_version": "1.0",
+      "rule_status": "prototype",
+      "source_reference": "Legal Metrology (Packaged Commodities) Rules, 2011 - general declaration requirements (simplified for demo; verify exact rule number officially)",
+      "explanation_template": "Product name declaration was {status_phrase}."
+    },
+    {
+      "rule_id": "LM-PC-002",
+      "title": "Declaration of Manufacturer/Packer/Importer",
+      "field": "manufacturer",
+      "applicability": "all_pre_packaged_commodities",
+      "requirement": "Name and address of the manufacturer, or packer, or importer must be declared.",
+      "validation_type": "presence",
+      "severity": "high",
+      "rule_version": "1.0",
+      "rule_status": "prototype",
+      "source_reference": "Legal Metrology (Packaged Commodities) Rules, 2011 - Rule 6 (simplified for demo; verify exact clause officially)",
+      "explanation_template": "Manufacturer/packer/importer declaration was {status_phrase}."
+    },
+    {
+      "rule_id": "LM-PC-003",
+      "title": "Declaration of Complete Address",
+      "field": "address",
+      "applicability": "all_pre_packaged_commodities",
+      "requirement": "A complete address (not merely a city/PIN) must accompany the manufacturer/packer/importer name.",
+      "validation_type": "format",
+      "severity": "medium",
+      "rule_version": "1.0",
+      "rule_status": "prototype",
+      "source_reference": "Legal Metrology (Packaged Commodities) Rules, 2011 (simplified for demo)",
+      "explanation_template": "Address declaration was {status_phrase}."
+    },
+    {
+      "rule_id": "LM-PC-004",
+      "title": "Declaration of Net Quantity",
+      "field": "net_quantity",
+      "applicability": "all_pre_packaged_commodities",
+      "requirement": "Net quantity must be declared in standard metric units (g, kg, ml, l, or count for numbers).",
+      "validation_type": "unit",
+      "severity": "high",
+      "rule_version": "1.0",
+      "rule_status": "prototype",
+      "source_reference": "Legal Metrology (Packaged Commodities) Rules, 2011 - Rule 6/Schedule (simplified for demo)",
+      "explanation_template": "Net quantity declaration was {status_phrase}.",
+      "allowed_units": ["g", "kg", "ml", "l", "mg", "n", "pieces"]
+    },
+    {
+      "rule_id": "LM-PC-005",
+      "title": "Declaration of Maximum Retail Price (MRP)",
+      "field": "mrp",
+      "applicability": "all_pre_packaged_commodities",
+      "requirement": "MRP inclusive of all taxes must be declared, prefixed with an unambiguous currency indicator (e.g. ₹ or Rs.) and a numeric value greater than zero.",
+      "validation_type": "mrp",
+      "severity": "high",
+      "rule_version": "1.0",
+      "rule_status": "prototype",
+      "source_reference": "Legal Metrology (Packaged Commodities) Rules, 2011 - Rule 6 (simplified for demo)",
+      "explanation_template": "MRP declaration was {status_phrase}."
+    },
+    {
+      "rule_id": "LM-PC-006",
+      "title": "Declaration of Manufacturing/Packing/Import Date",
+      "field": "mfg_date",
+      "applicability": "all_pre_packaged_commodities",
+      "requirement": "Month and year of manufacture, packing, or import must be declared in a recognizable date format.",
+      "validation_type": "date",
+      "severity": "medium",
+      "rule_version": "1.0",
+      "rule_status": "prototype",
+      "source_reference": "Legal Metrology (Packaged Commodities) Rules, 2011 - Rule 6 (simplified for demo)",
+      "explanation_template": "Manufacturing/packing date declaration was {status_phrase}."
+    },
+    {
+      "rule_id": "LM-PC-007",
+      "title": "Declaration of Consumer Care Details",
+      "field": "consumer_care",
+      "applicability": "all_pre_packaged_commodities",
+      "requirement": "A consumer care contact (phone number, email, or dedicated address/helpline) must be declared.",
+      "validation_type": "presence",
+      "severity": "medium",
+      "rule_version": "1.0",
+      "rule_status": "prototype",
+      "source_reference": "Legal Metrology (Packaged Commodities) Rules, 2011 - Rule 6 (simplified for demo)",
+      "explanation_template": "Consumer care details declaration was {status_phrase}."
+    },
+    {
+      "rule_id": "LM-PC-008",
+      "title": "Declaration of Country of Origin (where applicable)",
+      "field": "country_of_origin",
+      "applicability": "imported_commodities",
+      "requirement": "For imported packages, the country of origin/manufacture/assembly must be declared.",
+      "validation_type": "presence_conditional",
+      "severity": "low",
+      "rule_version": "1.0",
+      "rule_status": "prototype",
+      "source_reference": "Legal Metrology (Packaged Commodities) Rules, 2011 (simplified for demo)",
+      "explanation_template": "Country of origin declaration was {status_phrase}."
+    }
+  ]
+}
