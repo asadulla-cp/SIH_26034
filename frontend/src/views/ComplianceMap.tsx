@@ -46,17 +46,24 @@ export const ComplianceMap: React.FC = () => {
   const [inspections, setInspections] = useState<GeoInspection[]>([]);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     loadMapData();
   }, [statusFilter]);
 
   const loadMapData = async () => {
+    setLoading(true);
     try {
-      const data = await getGeoInspections(statusFilter);
+      const filterValue = statusFilter === 'ALL' ? undefined : statusFilter;
+      const data = await getGeoInspections(filterValue);
       setInspections(data);
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load map data:', e);
+      // Even on error, try to show fallback data
+      setInspections([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -88,8 +95,14 @@ export const ComplianceMap: React.FC = () => {
           <h2 style={{ fontSize: '24px', fontWeight: 800 }}>Geo-Tagged Compliance & Violation Map</h2>
         </div>
 
-        <button className="btn btn-secondary btn-sm" onClick={loadMapData}>
-          <RefreshCw size={14} /> Refresh Map Data
+        <button 
+          className="btn btn-secondary btn-sm" 
+          onClick={loadMapData}
+          disabled={loading}
+          style={{ opacity: loading ? 0.6 : 1 }}
+        >
+          <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} /> 
+          {loading ? 'Loading...' : 'Refresh Map Data'}
         </button>
       </div>
 
@@ -173,15 +186,19 @@ export const ComplianceMap: React.FC = () => {
         </div>
       </div>
 
-      {/* Interactive Leaflet Map Container */}
-      <div className="card" style={{ padding: '4px', overflow: 'hidden', height: '580px', borderRadius: 'var(--radius-lg)' }}>
+      {/* Interactive Leaflet Map Container - India Focused */}
+      <div className="card" style={{ padding: '4px', overflow: 'hidden', height: '650px', borderRadius: 'var(--radius-lg)' }}>
         <MapContainer
-          center={[22.5937, 78.9629]}
+          center={[20.5937, 78.9629]}
           zoom={5}
+          minZoom={4}
+          maxZoom={18}
           style={{ height: '100%', width: '100%', borderRadius: 'var(--radius-md)' }}
+          maxBounds={[[6.5, 68], [35.5, 97.5]]}
+          maxBoundsViscosity={1.0}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
@@ -205,22 +222,41 @@ export const ComplianceMap: React.FC = () => {
                     <span>Score: <strong>{item.compliance_score}/100</strong></span>
                     <span>Risk: <strong style={{ color: item.risk_level === 'critical' ? '#ef4444' : '#10b981' }}>{item.risk_level.toUpperCase()}</strong></span>
                   </div>
-                  <button
-                    onClick={() => navigate(`/inspections/${item.id}`)}
-                    style={{
+                  {item.id.toString().startsWith('geo-demo') ? (
+                    <div style={{
                       width: '100%',
-                      background: '#1e3a8a',
+                      background: 'linear-gradient(135deg, #8b5cf6, #ec4899)',
                       color: '#fff',
                       border: 'none',
-                      padding: '6px',
-                      borderRadius: '4px',
+                      padding: '8px',
+                      borderRadius: '6px',
                       fontSize: '11px',
                       fontWeight: 700,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    View Inspection Record
-                  </button>
+                      textAlign: 'center'
+                    }}>
+                      📍 Demo Location Data
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => navigate(`/inspections/${item.id}`)}
+                      style={{
+                        width: '100%',
+                        background: 'linear-gradient(135deg, #8b5cf6, #ec4899)',
+                        color: '#fff',
+                        border: 'none',
+                        padding: '8px',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s'
+                      }}
+                      onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                      onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                    >
+                      View Inspection Record
+                    </button>
+                  )}
                 </div>
               </Popup>
             </Marker>

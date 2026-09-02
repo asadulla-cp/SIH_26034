@@ -273,12 +273,6 @@ export interface EcommerceReport {
   ocr_fields: Record<string, any>;
 }
 
-export interface DemoProduct {
-  id: string;
-  name: string;
-  description: string;
-  is_compliant: boolean | null;
-}
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 

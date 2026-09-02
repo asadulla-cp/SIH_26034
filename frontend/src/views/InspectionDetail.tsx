@@ -201,25 +201,6 @@ export const InspectionDetail: React.FC = () => {
               )}
             </div>
 
-            {inspection.is_demo ? (
-              <div style={{
-                background: 'var(--bg-elevated)',
-                padding: '30px',
-                borderRadius: 'var(--radius-md)',
-                textAlign: 'center',
-                minHeight: '300px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <Layers size={36} color="var(--accent-primary)" style={{ marginBottom: '12px' }} />
-                <h4>Demo Package Record</h4>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                  Extracted from test dataset with Legal Metrology validation rules.
-                </p>
-              </div>
-            ) : (
               <div className="image-container" style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                 <img
                   src={getImageUrl(inspection.id, showAnnotated && inspection.has_annotated_image)}
@@ -227,7 +208,6 @@ export const InspectionDetail: React.FC = () => {
                   style={{ width: '100%', height: 'auto', display: 'block' }}
                 />
               </div>
-            )}
 
             {/* Officer Audit Trail */}
             {inspection.reviews && inspection.reviews.length > 0 && (

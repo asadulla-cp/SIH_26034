@@ -53,7 +53,6 @@ from backend.services.ocr_pipeline import (
     create_annotated_image,
     _empty_fields
 )
-from backend.services.demo_service import get_demo_products, get_demo_product
 from backend.services.report_service import generate_report
 from backend.services.commodity_detector import detect_commodity_category
 from backend.services.font_analyzer import (
@@ -62,11 +61,7 @@ from backend.services.font_analyzer import (
 from backend.services.barcode_detector import (
     detect_barcodes, verify_against_gs1
 )
-from backend.services.batch_processor import (
-    process_batch_zip, get_batch_job, list_batch_jobs, generate_batch_excel_report
-)
 from backend.services.legal_notice_generator import generate_legal_notice_pdf, calculate_notice_penalties
-from backend.services.ecommerce_scraper import scan_ecommerce_listing
 from rules.rule_engine import get_rule_engine
 
 # Gemini pipeline — optional, activated by GEMINI_API_KEY env var
@@ -696,140 +691,6 @@ async def scan_product(
         raise HTTPException(500, f"An error occurred while processing the image: {str(e)}")
 
 
-# ────────────────────────────────── Demo Scan ─────────────────────────────────
-@app.post("/api/scan/demo/{product_id}")
-async def scan_demo_product(product_id: str, db: Session = Depends(get_db)):
-    """Process a demo product with pre-defined data."""
-    try:
-        demo = get_demo_product(product_id)
-        if not demo:
-            raise HTTPException(404, f"Demo product '{product_id}' not found")
-
-        inspection_id = generate_inspection_id()
-        fields = demo["fields"]
-
-        # Run rule engine on demo fields
-        engine = get_rule_engine()
-        validation = engine.validate_all(fields)
-
-        product_name = demo["name"]
-
-        # ── Auto-detect commodity category for demo ─────────────────────────────
-        all_ocr_text = " ".join([
-            str(fdata.get("source_text", "")) for fdata in fields.values()
-        ])
-        commodity_result = detect_commodity_category(
-            ocr_text=all_ocr_text,
-            product_name=product_name,
-            extra_hint=""
-        )
-
-        inspection = Inspection(
-            inspection_id=inspection_id,
-            product_name=product_name,
-            image_path=None,
-            annotated_image_path=None,
-            overall_status=validation["overall_status"],
-            compliance_score=validation["compliance_score"],
-            total_fields=validation["total_checks"],
-            passed_fields=validation["passed"],
-            failed_fields=validation["failed"],
-            review_fields=validation["needs_review"],
-            is_demo=True,
-            image_quality_score=0.9,
-            image_quality_issues=[],
-            ocr_engine="demo",
-            processing_time_ms=150,
-            commodity_category=commodity_result.get("category"),
-            commodity_confidence=commodity_result.get("confidence"),
-            commodity_detection_meta=commodity_result,
-        )
-        db.add(inspection)
-        db.flush()
-
-        extracted_list = []
-        for field_name, field_data in fields.items():
-            ef = ExtractedField(
-                inspection_id=inspection.id,
-                field_name=field_name,
-                field_label=FIELD_LABELS.get(field_name, field_name),
-                detected_value=field_data.get("value"),
-                normalized_value=field_data.get("normalized_value"),
-                confidence=field_data.get("confidence", 0),
-                status="PENDING",
-                bounding_box=field_data.get("bounding_box"),
-                source_text=field_data.get("source_text", ""),
-                extraction_method=field_data.get("extraction_method", "demo"),
-                candidates=field_data.get("candidates"),
-            )
-            db.add(ef)
-            extracted_list.append(ef)
-
-        for vr in validation["results"]:
-            for ef in extracted_list:
-                if ef.field_name == vr["field"]:
-                    if (ef.status == "PENDING" or
-                            vr["status"] == "FAIL" or
-                            (vr["status"] == "NEEDS_REVIEW" and ef.status != "FAIL")):
-                        ef.status = vr["status"]
-
-        violation_list = []
-        for v in validation.get("violations", []) + validation.get("reviews", []):
-            if v["status"] == "PASS":
-                continue
-            viol = Violation(
-                inspection_id=inspection.id,
-                rule_id=v["rule_id"],
-                field=v["field"],
-                severity=v["severity"],
-                title=v["rule_title"],
-                detected_value=v.get("detected_value"),
-                expected_requirement=v.get("expected_requirement"),
-                reason=v.get("reason", ""),
-                confidence=v.get("confidence"),
-                evidence_type=v.get("evidence_type", "image"),
-                bounding_box=v.get("bounding_box"),
-                rule_version=v.get("rule_version", "1.0.0"),
-                is_prototype_rule=v.get("is_prototype_rule", True),
-            )
-            db.add(viol)
-            violation_list.append(viol)
-
-        db.commit()
-
-        response = _build_inspection_response(
-            inspection, extracted_list, violation_list, validation, None, None
-        )
-        response["is_demo"] = True
-        response["demo_description"] = demo["description"]
-        response["total_images"] = 1
-        response["successful_images"] = 1
-        response["per_image_results"] = []
-        response["has_conflicts"] = False
-        return JSONResponse(content=response)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Demo scan failed: {e}\n{traceback.format_exc()}")
-        raise HTTPException(500, "Demo scan failed. Please try again.")
-
-
-# ────────────────────────────────── Demo Products List ────────────────────────
-@app.get("/api/demo/products")
-async def list_demo_products():
-    products = get_demo_products()
-    return [
-        {
-            "id": p["id"],
-            "name": p["name"],
-            "description": p["description"],
-            "is_compliant": p["is_compliant"],
-        }
-        for p in products
-    ]
-
-
 # ────────────────────────────────── Inspections ───────────────────────────────
 @app.delete("/api/inspections")
 async def clear_all_inspections(db: Session = Depends(get_db)):
@@ -1169,27 +1030,6 @@ async def generate_inspection_report(inspection_id: str, db: Session = Depends(g
         raise HTTPException(500, "Failed to generate report")
 
 
-# ─────────────────────────── Phase 2: E-Commerce Scanner ───────────────────────
-class EcommerceScanRequest(BaseModel):
-    url: str
-
-
-@app.post("/api/scan/ecommerce")
-async def scan_ecommerce(req: EcommerceScanRequest, db: Session = Depends(get_db)):
-    """Scrape and scan e-commerce product listings (Amazon, Flipkart, etc.)."""
-    try:
-        url = req.url.strip()
-        if not url.startswith("http"):
-            raise HTTPException(400, "Please provide a valid product URL starting with http:// or https://")
-        result = scan_ecommerce_listing(url)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"E-commerce scan failed: {e}\n{traceback.format_exc()}")
-        raise HTTPException(500, f"E-commerce scan failed: {str(e)}")
-
-
 # ─────────────────────────── Phase 2: Geo Inspections Map ──────────────────────
 @app.get("/api/inspections/geo")
 async def get_inspections_geo(
@@ -1223,17 +1063,6 @@ async def get_inspections_geo(
         for i in inspections
     ]
 
-    # Include fallback demo GPS checkpoints if fewer than 5 exist in database
-    if len(results) < 5:
-        demo_geo = [
-            {"id": "geo-demo-1", "inspection_id": "MLX-2026-DEL-01", "product_name": "Tata Tea Gold 500g", "overall_status": "COMPLIANT", "compliance_score": 100, "severity_score": 0, "risk_level": "low", "latitude": 28.6139, "longitude": 77.2090, "created_at": datetime.datetime.now().isoformat(), "violation_count": 0, "location_name": "Connaught Place, New Delhi"},
-            {"id": "geo-demo-2", "inspection_id": "MLX-2026-DEL-02", "product_name": "QuickBite Instant Noodles", "overall_status": "NON_COMPLIANT", "compliance_score": 55, "severity_score": 75, "risk_level": "high", "latitude": 28.6304, "longitude": 77.2177, "created_at": datetime.datetime.now().isoformat(), "violation_count": 2, "location_name": "Sector 18 Market, Noida"},
-            {"id": "geo-demo-3", "inspection_id": "MLX-2026-MUM-01", "product_name": "FreshWash Detergent 1kg", "overall_status": "NON_COMPLIANT", "compliance_score": 65, "severity_score": 45, "risk_level": "medium", "latitude": 19.0760, "longitude": 72.8777, "created_at": datetime.datetime.now().isoformat(), "violation_count": 1, "location_name": "Dadar Wholesale Market, Mumbai"},
-            {"id": "geo-demo-4", "inspection_id": "MLX-2026-BLR-01", "product_name": "AquaPure Spring Water 1L", "overall_status": "NON_COMPLIANT", "compliance_score": 30, "severity_score": 90, "risk_level": "critical", "latitude": 12.9716, "longitude": 77.5946, "created_at": datetime.datetime.now().isoformat(), "violation_count": 3, "location_name": "Indiranagar Retail Hub, Bengaluru"},
-            {"id": "geo-demo-5", "inspection_id": "MLX-2026-KOL-01", "product_name": "GlowFit Protein Bar 60g", "overall_status": "NEEDS_REVIEW", "compliance_score": 72, "severity_score": 30, "risk_level": "medium", "latitude": 22.5726, "longitude": 88.3639, "created_at": datetime.datetime.now().isoformat(), "violation_count": 0, "location_name": "New Market, Kolkata"},
-            {"id": "geo-demo-6", "inspection_id": "MLX-2026-HYD-01", "product_name": "Amul Pure Ghee 1L", "overall_status": "COMPLIANT", "compliance_score": 100, "severity_score": 0, "risk_level": "low", "latitude": 17.3850, "longitude": 78.4867, "created_at": datetime.datetime.now().isoformat(), "violation_count": 0, "location_name": "Banjara Hills, Hyderabad"}
-        ]
-        results.extend(demo_geo)
 
     return results
 

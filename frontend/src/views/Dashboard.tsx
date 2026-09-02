@@ -410,7 +410,7 @@ export const Dashboard: React.FC = () => {
               <Database size={40} />
               <h3>No Inspections Yet</h3>
               <p style={{ fontSize: '13px', marginBottom: '16px' }}>
-                Scan a package label or run a preset demo dataset to start recording compliance data.
+                Scan a package label to start recording compliance data.
               </p>
               <button className="btn btn-primary btn-sm" onClick={() => navigate('/scan')}>
                 Start First Scan
@@ -433,17 +433,6 @@ export const Dashboard: React.FC = () => {
                   <tr key={item.id}>
                     <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
                       {item.inspection_id}
-                      {item.is_demo && (
-                        <span style={{
-                          marginLeft: '6px',
-                          fontSize: '9px',
-                          padding: '1px 4px',
-                          background: 'rgba(245, 158, 11, 0.15)',
-                          color: 'var(--status-review)',
-                          borderRadius: '3px',
-                          fontWeight: 700
-                        }}>DEMO</span>
-                      )}
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                       {item.product_name}
@@ -529,43 +518,6 @@ export const Dashboard: React.FC = () => {
               ))}
             </div>
           )}
-
-          {/* Quick Demo Launchers */}
-          <div style={{
-            marginTop: '24px',
-            paddingTop: '16px',
-            borderTop: '1px solid var(--border-primary)'
-          }}>
-            <h4 style={{ fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
-              Instant Demo Presets
-            </h4>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-              Click to run immediate sample inspections for judge evaluation:
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <button
-                className="btn btn-secondary btn-sm"
-                style={{ justifyContent: 'flex-start', fontSize: '12px' }}
-                onClick={() => navigate('/scan?demo=demo-001')}
-              >
-                <ShieldCheck size={14} color="var(--status-pass)" /> 1. Fully Compliant Package
-              </button>
-              <button
-                className="btn btn-secondary btn-sm"
-                style={{ justifyContent: 'flex-start', fontSize: '12px' }}
-                onClick={() => navigate('/scan?demo=demo-002')}
-              >
-                <XCircle size={14} color="var(--status-fail)" /> 2. Missing MRP Declaration
-              </button>
-              <button
-                className="btn btn-secondary btn-sm"
-                style={{ justifyContent: 'flex-start', fontSize: '12px' }}
-                onClick={() => navigate('/scan?demo=demo-004')}
-              >
-                <AlertTriangle size={14} color="var(--status-review)" /> 3. Ambiguous / Low OCR Confidence
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

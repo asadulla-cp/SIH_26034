@@ -6,3 +6,21 @@ node_modules/
 frontend/dist/
 .DS_Store
 *.egg-info/
+
+# Secrets
+.env
+
+# Database files
+*.db
+*.sqlite
+
+# Uploaded images & generated files
+uploads/
+annotated/
+reports/
+
+# EasyOCR / ML model weights
+.easyocr_models/
+
+# Nested repo clone (was accidentally placed here)
+frontend/SIH_26034/

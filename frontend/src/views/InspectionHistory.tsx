@@ -156,17 +156,6 @@ export const InspectionHistory: React.FC = () => {
                 <tr key={item.id}>
                   <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
                     {item.inspection_id}
-                    {item.is_demo && (
-                      <span style={{
-                        marginLeft: '6px',
-                        fontSize: '9px',
-                        padding: '1px 4px',
-                        background: 'rgba(245, 158, 11, 0.15)',
-                        color: 'var(--status-review)',
-                        borderRadius: '3px',
-                        fontWeight: 700
-                      }}>DEMO</span>
-                    )}
                   </td>
                   <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                     {item.product_name}

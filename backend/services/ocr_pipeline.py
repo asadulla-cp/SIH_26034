@@ -312,7 +312,19 @@ def _get_distance(b1: list, b2: list) -> float:
 def _is_below_or_right(anchor: list, target: list, max_dist_multiplier: float = 4.0) -> bool:
     """Check if target box is reasonably below or to the right of anchor box."""
     anchor_h = max(1, anchor[3] - anchor[1])
-    # Must be within max_dist_multiplier * anchor height
+
+    # Same-row check: if target vertically overlaps the anchor, it's on the same line.
+    # In this case use a much wider horizontal tolerance (20x anchor height) so that
+    # values placed far to the right of their label (e.g. "MRP: ... ₹199") are found.
+    anchor_mid_y = (anchor[1] + anchor[3]) / 2
+    target_mid_y = (target[1] + target[3]) / 2
+    same_row = abs(anchor_mid_y - target_mid_y) < anchor_h * 1.5
+    if same_row and target[0] > anchor[0]:
+        # Same row, target is to the right — always allow up to 20× anchor height wide
+        horiz_dist = target[0] - anchor[2]  # gap between label right edge and value left edge
+        return horiz_dist < anchor_h * 20
+
+    # Otherwise use the original distance cap
     dist = _get_distance(anchor, target)
     if dist > anchor_h * max_dist_multiplier:
         return False
@@ -407,7 +419,12 @@ class MRPDetector(BaseDetector):
     def __init__(self):
         super().__init__("mrp")
         self.label_patterns = [r"m\.?\s*r\.?\s*p\.?", r"maximum\s*retail\s*price"]
-        self.val_patterns = [r"(?:₹|rs[\.\:\-\s]*|inr[\.\:\-\s]*)\s*([0-9IlOo,\.]+)", r"^([0-9IlOo,\.]+)$"]
+        self.val_patterns = [
+            r"(?:₹|rs[\.\:\-\s]*|inr[\.\:\-\s]*)\s*([0-9IlOo,\.]+)",
+            r"^([0-9IlOo,\.]+)$",
+            # Leading number on a line that has extra text like "(Inclusive of all taxes)"
+            r"^([0-9IlOo,\.]{2,})\s*[\(\s]",
+        ]
 
     def detect(self, ocr_results, nutrition_zones, merged_blocks, all_text) -> list:
         candidates = []
@@ -583,40 +600,80 @@ class ManufacturerDetector(BaseDetector):
 
     def detect(self, ocr_results, nutrition_zones, merged_blocks, all_text) -> list:
         candidates = []
-        for block in merged_blocks:
-            text = block["text"].lower()
+
+        # First pass: find label tokens
+        labels = []
+        for item in ocr_results:
+            text = item["text"].lower()
             if any(re.search(p, text) for p in self.kws):
-                # Extract the entity name roughly
-                clean = block["text"]
-                clean = re.sub(r"(?i)^(.*?)(?:manufactured\s*(?:by|&)?|marketed\s*by|packed\s*by)\s*[:\-]*\s*", "", clean)
-                # Take first line of the remaining block as manufacturer
-                lines = clean.split(" ")
-                val = " ".join(lines[:4]) # Heuristic
-                if len(val) > 3:
+                labels.append(item)
+
+        for label in labels:
+            label_box = label["bbox_rect"]
+
+            # Check if the value is inline in the label itself
+            clean = re.sub(r"(?i)^(.*?)(?:manufactured\s*(?:by|&)?|marketed\s*by|packed\s*by)\s*[:\-]*\s*", "", label["text"]).strip()
+            if len(clean) > 3 and not clean.lower().startswith("add"):
+                candidates.append({
+                    "text": clean,
+                    "confidence": label["confidence"],
+                    "score": label["confidence"] + 1.0,
+                    "bbox": label_box,
+                    "source_text": label["text"],
+                    "reason": "Inline manufacturer name"
+                })
+                continue
+
+            # Spatial lookup: find value token to the right or below the label
+            for item in ocr_results:
+                if item is label:
+                    continue
+                if _is_in_zones(item["bbox_rect"], nutrition_zones):
+                    continue
+                if _is_below_or_right(label_box, item["bbox_rect"], max_dist_multiplier=5.0):
+                    t = item["text"].strip()
+                    if not t or len(t) < 3:
+                        continue
+                    # Skip label-like tokens or partial manufacturer keyword matches
+                    if t.lower().startswith("address") or t.endswith(":"):
+                        continue
+                    if any(re.search(p, t.lower()) for p in self.kws):
+                        continue
+                    # Skip tokens that look like fragments of the label word itself
+                    if re.match(r"(?i)^manufact|^marketed|^packed", t):
+                        continue
+                    # Skip things that look like phone numbers, dates, or PIN codes
+                    if re.match(r"^[\d\-\+\(\)]{6,}$", t):
+                        continue
+                    dist = _get_distance(label_box, item["bbox_rect"])
                     candidates.append({
-                        "text": val,
-                        "confidence": block["confidence"],
-                        "score": block["confidence"] + 0.5,
-                        "bbox": block["bbox_rect"],
-                        "source_text": block["text"],
-                        "reason": "Block matched Manufacturer header"
+                        "text": t,
+                        "confidence": item["confidence"],
+                        "score": item["confidence"] + 0.8 - min(0.4, dist / 300),
+                        "bbox": item["bbox_rect"],
+                        "source_text": item["text"],
+                        "reason": f"Spatially near Manufacturer label"
                     })
+
         return candidates
 
 class GenericDetector(BaseDetector):
-    def __init__(self, name: str, kws: list, regexes: list = None):
+    def __init__(self, name: str, kws: list, regexes: list = None, regex_only: bool = False):
         super().__init__(name)
         self.kws = kws
         self.regexes = regexes or []
+        self.regex_only = regex_only  # if True, spatial fallback only uses regex matches (no plain value)
 
     def detect(self, ocr_results, nutrition_zones, merged_blocks, all_text) -> list:
         candidates = []
+        labels_found = []
         for item in ocr_results:
             text = item["text"].lower()
             score = 0.0
             if any(re.search(p, text) for p in self.kws):
                 score += 0.5
-            
+                labels_found.append(item)
+
             for rx in self.regexes:
                 m = re.search(rx, item["text"], re.IGNORECASE)
                 if m:
@@ -630,14 +687,73 @@ class GenericDetector(BaseDetector):
                         "reason": f"Regex match + Keyword"
                     })
             if score > 0 and not self.regexes:
-                candidates.append({
-                    "text": item["text"],
-                    "confidence": item["confidence"],
-                    "score": item["confidence"] + score,
-                    "bbox": item["bbox_rect"],
-                    "source_text": item["text"],
-                    "reason": "Keyword match"
-                })
+                t = item["text"].strip()
+                # Don't return the label token itself as the value (e.g. "Common Name:")
+                if t.endswith(":") or t.endswith("?") or not t:
+                    pass
+                else:
+                    candidates.append({
+                        "text": t,
+                        "confidence": item["confidence"],
+                        "score": item["confidence"] + score,
+                        "bbox": item["bbox_rect"],
+                        "source_text": item["text"],
+                        "reason": "Keyword match"
+                    })
+
+        # Spatial lookup: if we found a label, look for value tokens nearby
+        for label in labels_found:
+            label_box = label["bbox_rect"]
+            for item in ocr_results:
+                if item is label:
+                    continue
+                if _is_in_zones(item["bbox_rect"], nutrition_zones):
+                    continue
+                if _is_below_or_right(label_box, item["bbox_rect"], max_dist_multiplier=5.0):
+                    # Skip items that look like another label (contain a colon at end, or match kws)
+                    t = item["text"].strip()
+                    if not t or t.endswith(":") or any(re.search(p, t.lower()) for p in self.kws):
+                        continue
+                    # For fields with regexes, prefer regex match; but also accept plain nearby value
+                    if self.regexes:
+                        matched = False
+                        for rx in self.regexes:
+                            m = re.search(rx, item["text"], re.IGNORECASE)
+                            if m:
+                                val = m.group(1).strip() if m.groups() else m.group(0).strip()
+                                dist = _get_distance(label_box, item["bbox_rect"])
+                                candidates.append({
+                                    "text": val,
+                                    "confidence": item["confidence"],
+                                    "score": item["confidence"] + 0.7 - min(0.3, dist / 500),
+                                    "bbox": item["bbox_rect"],
+                                    "source_text": item["text"],
+                                    "reason": "Spatial regex match near label"
+                                })
+                                matched = True
+                        if not matched and not self.regex_only:
+                            # Accept plain text value found spatially near a label
+                            # (e.g. "India" after "CountryofOrigin:" label)
+                            dist = _get_distance(label_box, item["bbox_rect"])
+                            candidates.append({
+                                "text": t,
+                                "confidence": item["confidence"],
+                                "score": item["confidence"] + 0.5 - min(0.3, dist / 500),
+                                "bbox": item["bbox_rect"],
+                                "source_text": item["text"],
+                                "reason": "Spatial proximity to label (plain value)"
+                            })
+                    else:
+                        dist = _get_distance(label_box, item["bbox_rect"])
+                        candidates.append({
+                            "text": t,
+                            "confidence": item["confidence"],
+                            "score": item["confidence"] + 0.6 - min(0.3, dist / 500),
+                            "bbox": item["bbox_rect"],
+                            "source_text": item["text"],
+                            "reason": "Spatial proximity to label"
+                        })
+
         return candidates
 
 DETECTORS = [
@@ -646,8 +762,8 @@ DETECTORS = [
     QuantityDetector(),
     ManufacturerDetector(),
     GenericDetector("consumer_care", [r"consumer", r"care", r"feedback"], [r"([\w\.-]+@[\w\.-]+\.\w+)", r"(1800[-\s]?\d{3}[-\s]?\d{3,4}|\b\d{10}\b)"]),
-    GenericDetector("country_of_origin", [r"country of origin", r"made in", r"product of"], [r"(?:made\s*in|product\s*of)\s*([a-zA-Z\s]+)"]),
-    GenericDetector("address", [r"address", r"regd\.?\s*off", r"pin\s*code"], [r"(\b\d{6}\b)"]),
+    GenericDetector("country_of_origin", [r"country\s*of\s*origin", r"made\s*in", r"product\s*of"], [r"(?:made\s*in|product\s*of)\s*([a-zA-Z\s]+)"]),
+    GenericDetector("address", [r"address", r"regd\.?\s*off", r"pin\s*code"], [r"(\b\d{6}\b)"], regex_only=True),
     GenericDetector("common_name", [r"common\s*name", r"generic\s*name"]),
 ]
 
@@ -746,7 +862,16 @@ def _normalize_field_value(field_name: str, value: str) -> str:
     if field_name == "mrp":
         repaired = repair_ocr_digits(val)
         nums = re.findall(r"[\d\.]+", repaired)
-        if nums: return f"₹{nums[0]}"
+        if nums:
+            try:
+                # Parse as float to strip leading zeros (e.g. "0199" → 199.0)
+                price = float(nums[0])
+                if price > 0:
+                    formatted = f"{int(price)}" if price == int(price) else f"{price:.2f}"
+                    return f"₹{formatted}"
+            except ValueError:
+                pass
+            return f"₹{nums[0]}"
         return val
     elif field_name == "product_name": return val.title()
     elif field_name == "country_of_origin": return re.sub(r"(?:country\s*of\s*origin|made\s*in|product\s*of|[:\.\-])", "", val, flags=re.I).strip().title()

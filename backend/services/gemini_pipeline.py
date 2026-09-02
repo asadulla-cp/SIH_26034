@@ -1,5 +1,5 @@
 """
-MetaLex — Gemini 3.6 Flash Extraction Pipeline
+MetaLex — Gemini 2.5 Flash Extraction Pipeline
 Uses Google Gemini 3.6 Flash multimodal capabilities with:
   - Native structured JSON schema output (no regex parsing needed)
   - System instruction for Legal Metrology officer persona
@@ -100,14 +100,13 @@ ALL_FIELDS = list(FIELD_LABELS.keys())
 
 # ─────────────────────── Helpers ────────────────────────────────────────────
 
-def _get_client():
-    from google import genai
+def _get_api_key():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError(
             "GEMINI_API_KEY not set. Add it to your .env file: GEMINI_API_KEY=<your_key>"
         )
-    return genai.Client(api_key=api_key)
+    return api_key
 
 
 def _load_pil_image(path: str) -> PIL.Image.Image:
@@ -192,54 +191,68 @@ def _assess_image_quality(file_path: str) -> dict:
 
 # ─────────────────────── Main Pipeline ──────────────────────────────────────
 
+# ─────────────────────── Main Pipeline ──────────────────────────────────────
+
 def process_with_gemini(file_paths: list[str]) -> dict:
     """
-    Run Gemini 3.6 Flash extraction on one or more package images.
+    Run Gemini 2.5 Flash extraction on one or more package images via REST API.
     Returns a field dict in the same schema as ocr_pipeline.process_multiple_images().
     """
-    from google.genai import types
+    import base64
+    import requests
 
-    client = _get_client()
+    api_key = _get_api_key()
+    url = f"https://generativelanguage.googleapis.com/v1alpha/models/{MODEL_ID}:generateContent?key={api_key}"
 
-    # ── Load all images ──────────────────────────────────────────────────────
-    images = []
+    # ── Load and encode all images ───────────────────────────────────────────
     quality_scores = []
+    image_parts = []
     for fp in file_paths:
         try:
             pil_img = _load_pil_image(fp)
-            images.append(pil_img)
+            import io
+            buf = io.BytesIO()
+            pil_img.save(buf, format="JPEG", quality=90)
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            image_parts.append({
+                "inline_data": {"mime_type": "image/jpeg", "data": b64}
+            })
             quality_scores.append(_assess_image_quality(fp))
         except Exception as e:
             logger.warning(f"Could not load image {fp}: {e}")
             quality_scores.append({"overall_score": 0.0, "quality_label": "Failed", "issues": [str(e)]})
 
-    if not images:
+    if not image_parts:
         raise ValueError("No valid package images could be loaded for Gemini processing.")
 
-    # ── Build multi-image aware prompt ───────────────────────────────────────
     image_note = ""
-    if len(images) > 1:
+    if len(image_parts) > 1:
         image_note = (
-            f"\n\nNOTE: You are viewing {len(images)} photos of the SAME physical package "
+            f"\n\nNOTE: You are viewing {len(image_parts)} photos of the SAME physical package "
             f"from different angles/sides. Inspect ALL images before concluding a field is absent."
         )
 
-    # ── Call Gemini 3.6 Flash ────────────────────────────────────────────────
-    logger.info(f"Calling {MODEL_ID} with {len(images)} image(s)...")
+    # ── Build request payload ────────────────────────────────────────────────
+    parts = image_parts + [{"text": EXTRACTION_PROMPT + image_note}]
 
+    payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.05,
+            "topP": 0.95,
+            "maxOutputTokens": 2048,
+        },
+    }
+
+    # ── Call Gemini REST API ─────────────────────────────────────────────────
+    logger.info(f"Calling {MODEL_ID} REST API with {len(image_parts)} image(s)...")
     try:
-        response = client.models.generate_content(
-            model=MODEL_ID,
-            contents=images + [EXTRACTION_PROMPT + image_note],
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                response_mime_type="application/json",
-                temperature=0.05,          # Near-zero for deterministic extraction
-                top_p=0.95,
-                max_output_tokens=2048,
-            ),
-        )
-        raw_text = response.text or "{}"
+        resp = requests.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as api_err:
         logger.error(f"Gemini API error: {api_err}")
         raise RuntimeError(f"Gemini extraction failed: {api_err}") from api_err
@@ -257,19 +270,26 @@ def process_with_gemini(file_paths: list[str]) -> dict:
     except Exception as e:
         logger.warning(f"OCR bbox extraction skipped: {e}")
 
-    # ── Build fused_fields in the MetaLex schema ─────────────────────────────
-    fused_fields = {}
+    # ── Remap Gemini field names → rule engine field names ───────────────────
+    FIELD_REMAP = {
+        "date_of_manufacture": "date",
+        "use_by_date": "date",          # merge into single date field (take whichever found)
+        "customer_care": "consumer_care",
+    }
+
+    remapped_fields = {}
     for field_key in ALL_FIELDS:
         raw = extracted.get(field_key) or {}
         val = raw.get("value") if isinstance(raw, dict) else None
         conf = float(raw.get("confidence", 0.0)) if isinstance(raw, dict) else 0.0
         conf = max(0.0, min(1.0, conf))
 
-        # Sanitize null-like string values
         if val is not None and str(val).strip().lower() in ("", "null", "none", "n/a", "not found", "not visible"):
             val = None
 
         bbox = _find_bbox_in_ocr(val, ocr_results) if val else None
+
+        target_key = FIELD_REMAP.get(field_key, field_key)
 
         candidate = {
             "value": val,
@@ -280,7 +300,7 @@ def process_with_gemini(file_paths: list[str]) -> dict:
             "source_image_number": 1,
         } if val else None
 
-        fused_fields[field_key] = {
+        entry = {
             "value": val,
             "normalized_value": val,
             "confidence": conf,
@@ -293,6 +313,16 @@ def process_with_gemini(file_paths: list[str]) -> dict:
             "source_image_index": 0,
             "source_image_number": 1,
         }
+
+        # For remapped keys, only overwrite if this has a better value
+        if target_key in remapped_fields:
+            existing = remapped_fields[target_key]
+            if val and (not existing.get("value") or conf > existing.get("confidence", 0)):
+                remapped_fields[target_key] = entry
+        else:
+            remapped_fields[target_key] = entry
+
+    fused_fields = remapped_fields
 
     # ── Per-image summaries ──────────────────────────────────────────────────
     detected_fields = [k for k, v in fused_fields.items() if v.get("value")]
@@ -308,7 +338,6 @@ def process_with_gemini(file_paths: list[str]) -> dict:
             "annotated_image": None,
         })
 
-    # ── Overall quality (avg of all images) ─────────────────────────────────
     avg_quality = sum(q["overall_score"] for q in quality_scores) / len(quality_scores) if quality_scores else 0.9
     quality_issues = []
     for q in quality_scores:

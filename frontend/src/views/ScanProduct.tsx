@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import {
   Upload,
   Scan,
@@ -11,9 +10,7 @@ import {
   Edit3,
   CheckCircle2,
   RefreshCw,
-  Sparkles,
   Info,
-  Layers,
   AlertCircle,
   Plus,
   X,
@@ -24,14 +21,12 @@ import {
 } from 'lucide-react';
 import {
   scanUploadedImages,
-  scanDemoProduct,
-  getDemoProducts,
   getImageUrl,
   getReportDownloadUrl,
   submitReviewAction
 } from '../api';
 import { queueOfflineInspection } from '../offline-queue';
-import type { DemoProduct, ExtractedField, Violation } from '../types';
+import type { ExtractedField, Violation } from '../types';
 
 // ─────────────────────────── Types ────────────────────────────────────────────
 interface ImageSlot {
@@ -56,12 +51,10 @@ const ANGLE_HINTS = [
 
 // ─────────────────────────── Main Component ───────────────────────────────────
 export const ScanProduct: React.FC = () => {
-  const [searchParams] = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Multi-image state
   const [imageSlots, setImageSlots] = useState<ImageSlot[]>([]);
-  const [demoProducts, setDemoProducts] = useState<DemoProduct[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingSteps, setProcessingSteps] = useState<{ label: string; status: 'waiting' | 'active' | 'done' | 'failed' }[]>([]);
   const [result, setResult] = useState<any | null>(null);
@@ -83,15 +76,6 @@ export const ScanProduct: React.FC = () => {
 
   // Multi-Language selection
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['en', 'hi']);
-
-  useEffect(() => {
-    getDemoProducts().then(setDemoProducts).catch(console.error);
-
-    const demoParam = searchParams.get('demo');
-    if (demoParam) {
-      handleRunDemo(demoParam);
-    }
-  }, [searchParams]);
 
   // ─────────────────── Image Slot Management ──────────────────────────────────
   const addFiles = useCallback((newFiles: FileList | File[]) => {
@@ -222,46 +206,6 @@ export const ScanProduct: React.FC = () => {
     }
   };
 
-  const handleRunDemo = (productId: string) => {
-    setImageSlots([]);
-    setResult(null);
-    setError(null);
-    setIsProcessing(true);
-    const steps = [
-      { label: 'Loading demo dataset', status: 'active' as const },
-      { label: 'Applying Legal Metrology Rules', status: 'waiting' as const },
-      { label: 'Generating compliance evidence', status: 'waiting' as const },
-    ];
-    setProcessingSteps(steps);
-
-    const interval = setInterval(() => {
-      setProcessingSteps(prev => {
-        const firstWaiting = prev.findIndex(s => s.status === 'waiting');
-        if (firstWaiting === -1) {
-          clearInterval(interval);
-          return prev.map(s => ({ ...s, status: 'done' }));
-        }
-        return prev.map((s, i) => {
-          if (i < firstWaiting) return { ...s, status: 'done' };
-          if (i === firstWaiting) return { ...s, status: 'active' };
-          return s;
-        });
-      });
-    }, 500);
-
-    scanDemoProduct(productId)
-      .then(data => {
-        clearInterval(interval);
-        setProcessingSteps(prev => prev.map(s => ({ ...s, status: 'done' })));
-        setResult(data);
-      })
-      .catch(err => {
-        clearInterval(interval);
-        setError(err.message || 'Demo failed');
-      })
-      .finally(() => setIsProcessing(false));
-  };
-
   const handleOpenReview = (field: ExtractedField) => {
     setReviewingField(field);
     setEditedValue(field.detected_value || '');
@@ -346,31 +290,6 @@ export const ScanProduct: React.FC = () => {
           </div>
         )}
       </div>
-
-      {/* ── Demo Presets ── */}
-      {!result && !isProcessing && (
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-lg)', padding: '16px 20px', marginBottom: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-            <Sparkles size={16} color="var(--accent-secondary)" />
-            <span style={{ fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Quick Demo Presets for Hackathon Evaluation
-            </span>
-          </div>
-          <div className="demo-grid" style={{ marginTop: '8px' }}>
-            {demoProducts.map((p) => (
-              <div key={p.id} className="demo-card" onClick={() => handleRunDemo(p.id)} style={{ position: 'relative' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                  <h4 style={{ fontSize: '14px', margin: 0 }}>{p.name}</h4>
-                  {p.is_compliant === true && <span className="status-badge compliant" style={{ fontSize: '10px', padding: '1px 6px' }}>Pass</span>}
-                  {p.is_compliant === false && <span className="status-badge non-compliant" style={{ fontSize: '10px', padding: '1px 6px' }}>Fail</span>}
-                  {p.is_compliant === null && <span className="status-badge needs-review" style={{ fontSize: '10px', padding: '1px 6px' }}>Review</span>}
-                </div>
-                <p style={{ fontSize: '12px', margin: 0 }}>{p.description}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── Multi-Image Upload Zone ── */}
       {!result && !isProcessing && (
@@ -638,7 +557,7 @@ export const ScanProduct: React.FC = () => {
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
             <div className="spinner" style={{ width: '40px', height: '40px', margin: '0 auto 16px' }} />
             <h3 style={{ fontSize: '20px', fontWeight: 700 }}>
-              Analyzing {imageSlots.length > 0 ? imageSlots.length + ' Package Image' + (imageSlots.length > 1 ? 's' : '') : 'Demo Data'}...
+              Analyzing {imageSlots.length} Package Image{imageSlots.length !== 1 ? 's' : ''}...
             </h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
               OCR · Field Extraction · Cross-Image Fusion · Legal Rule Engine
@@ -791,28 +710,13 @@ export const ScanProduct: React.FC = () => {
                   )}
                 </div>
 
-                {result.is_demo ? (
-                  <div style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', padding: '24px', textAlign: 'center', minHeight: '260px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed var(--border-primary)' }}>
-                    <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', color: 'var(--accent-primary)' }}>
-                      <Layers size={32} />
-                    </div>
-                    <h4 style={{ fontSize: '16px', fontWeight: 600 }}>Demo Dataset Mode</h4>
-                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '340px', marginTop: '6px' }}>
-                      {result.demo_description || 'Verified sample with deterministic Legal Metrology rules.'}
-                    </p>
-                    <div style={{ marginTop: '20px', padding: '8px 16px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 'var(--radius-md)', fontSize: '12px', color: 'var(--status-review)' }}>
-                      Verified Sample: <strong>{result.product_name}</strong>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="image-container" style={{ position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                <div className="image-container" style={{ position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                     <img
                       src={getImageUrl(result.id, showAnnotatedImage && result.has_annotated_image)}
                       alt="Inspection Evidence"
                       style={{ width: '100%', height: 'auto', display: 'block' }}
                     />
                   </div>
-                )}
 
                 {/* Image Quality Assessment */}
                 {result.image_quality && (
@@ -926,7 +830,7 @@ export const ScanProduct: React.FC = () => {
                             ) : isMissing ? (
                               <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Not detected</span>
                             ) : (
-                              <span title={f.detected_value}>{f.detected_value}</span>
+                              <span title={f.detected_value}>{f.normalized_value || f.detected_value}</span>
                             )}
                           </td>
                           <td>
