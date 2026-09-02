@@ -11,7 +11,7 @@ services:
       - key: SECRET_KEY
         value: metalex-sih-2026-secret-key
       - key: CORS_ORIGINS
-        value: "https://sih-26034-rho.vercel.app,http://localhost:5173"
+        value: "https://sih-26034-rho.vercel.app,https://sih-26034.vercel.app,http://localhost:5173"
       - key: GEMINI_API_KEY
         sync: false
     healthCheckPath: /api/health
