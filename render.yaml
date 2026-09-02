@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: metalex-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: SECRET_KEY
+        value: metalex-sih-2026-secret-key
+      - key: CORS_ORIGINS
+        value: "https://sih-26034-rho.vercel.app,http://localhost:5173"
+    healthCheckPath: /health

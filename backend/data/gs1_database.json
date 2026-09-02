@@ -1,0 +1,702 @@
+{
+  "8901030383846": {
+    "product_name": "Tata Tea Gold",
+    "manufacturer": "Tata Consumer Products Ltd",
+    "category": "tea",
+    "declared_mrp": 199.0,
+    "net_quantity": "500g"
+  },
+  "8901030383853": {
+    "product_name": "Tata Tea Premium",
+    "manufacturer": "Tata Consumer Products Ltd",
+    "category": "tea",
+    "declared_mrp": 140.0,
+    "net_quantity": "250g"
+  },
+  "8901030383860": {
+    "product_name": "Tata Salt Vacuum Evaporated",
+    "manufacturer": "Tata Consumer Products Ltd",
+    "category": "salt",
+    "declared_mrp": 28.0,
+    "net_quantity": "1kg"
+  },
+  "8901063012218": {
+    "product_name": "Britannia Good Day Butter Cookies",
+    "manufacturer": "Britannia Industries Ltd",
+    "category": "biscuits",
+    "declared_mrp": 35.0,
+    "net_quantity": "200g"
+  },
+  "8901063012225": {
+    "product_name": "Britannia Marie Gold",
+    "manufacturer": "Britannia Industries Ltd",
+    "category": "biscuits",
+    "declared_mrp": 40.0,
+    "net_quantity": "300g"
+  },
+  "8901063012232": {
+    "product_name": "Britannia Bourbon",
+    "manufacturer": "Britannia Industries Ltd",
+    "category": "biscuits",
+    "declared_mrp": 30.0,
+    "net_quantity": "150g"
+  },
+  "8901719101015": {
+    "product_name": "Parle-G Original Gluco Biscuits",
+    "manufacturer": "Parle Products Pvt Ltd",
+    "category": "biscuits",
+    "declared_mrp": 10.0,
+    "net_quantity": "130g"
+  },
+  "8901719101022": {
+    "product_name": "Parle Monaco Salted Crackers",
+    "manufacturer": "Parle Products Pvt Ltd",
+    "category": "biscuits",
+    "declared_mrp": 20.0,
+    "net_quantity": "120g"
+  },
+  "8901719101039": {
+    "product_name": "Parle Hide & Seek Chocolate Chip",
+    "manufacturer": "Parle Products Pvt Ltd",
+    "category": "biscuits",
+    "declared_mrp": 50.0,
+    "net_quantity": "200g"
+  },
+  "8901058852683": {
+    "product_name": "Maggi 2-Minute Masala Noodles",
+    "manufacturer": "Nestle India Ltd",
+    "category": "noodles",
+    "declared_mrp": 14.0,
+    "net_quantity": "70g"
+  },
+  "8901058852690": {
+    "product_name": "Maggi 2-Minute Noodles 4-Pack",
+    "manufacturer": "Nestle India Ltd",
+    "category": "noodles",
+    "declared_mrp": 56.0,
+    "net_quantity": "280g"
+  },
+  "8901058852706": {
+    "product_name": "Nescafe Classic Instant Coffee",
+    "manufacturer": "Nestle India Ltd",
+    "category": "coffee",
+    "declared_mrp": 180.0,
+    "net_quantity": "50g"
+  },
+  "8901058852713": {
+    "product_name": "Nestle Everyday Dairy Whitener",
+    "manufacturer": "Nestle India Ltd",
+    "category": "milk_powder",
+    "declared_mrp": 230.0,
+    "net_quantity": "400g"
+  },
+  "8901058852720": {
+    "product_name": "KitKat 4-Finger Chocolate Bar",
+    "manufacturer": "Nestle India Ltd",
+    "category": "chocolate",
+    "declared_mrp": 25.0,
+    "net_quantity": "37.3g"
+  },
+  "8901030001016": {
+    "product_name": "Surf Excel Quick Wash Detergent",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "detergent",
+    "declared_mrp": 210.0,
+    "net_quantity": "1kg"
+  },
+  "8901030001023": {
+    "product_name": "Surf Excel Matic Front Load",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "detergent",
+    "declared_mrp": 380.0,
+    "net_quantity": "2kg"
+  },
+  "8901030001030": {
+    "product_name": "Rin Advanced Detergent Bar",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "soap",
+    "declared_mrp": 20.0,
+    "net_quantity": "250g"
+  },
+  "8901030001047": {
+    "product_name": "Dove Cream Beauty Bathing Bar",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "soap",
+    "declared_mrp": 65.0,
+    "net_quantity": "100g"
+  },
+  "8901030001054": {
+    "product_name": "Lifebuoy Total Germ Protection Soap",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "soap",
+    "declared_mrp": 36.0,
+    "net_quantity": "125g"
+  },
+  "8901030001061": {
+    "product_name": "Lux Velvet Glow Jasmine Soap",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "soap",
+    "declared_mrp": 42.0,
+    "net_quantity": "100g"
+  },
+  "8901030001078": {
+    "product_name": "Red Label Tea",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "tea",
+    "declared_mrp": 260.0,
+    "net_quantity": "500g"
+  },
+  "8901030001085": {
+    "product_name": "Bru Instant Coffee",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "coffee",
+    "declared_mrp": 195.0,
+    "net_quantity": "100g"
+  },
+  "8901030001092": {
+    "product_name": "Vim Lemon Dishwash Bar",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "detergent",
+    "declared_mrp": 15.0,
+    "net_quantity": "200g"
+  },
+  "8901030001108": {
+    "product_name": "Knorr Classic Mixed Vegetable Soup",
+    "manufacturer": "Hindustan Unilever Ltd",
+    "category": "soup",
+    "declared_mrp": 40.0,
+    "net_quantity": "53g"
+  },
+  "8901314010017": {
+    "product_name": "Aashirvaad Superior MP Sharbati Atta",
+    "manufacturer": "ITC Ltd",
+    "category": "atta",
+    "declared_mrp": 320.0,
+    "net_quantity": "5kg"
+  },
+  "8901314010024": {
+    "product_name": "Aashirvaad Select 100% Sharbati Wheat",
+    "manufacturer": "ITC Ltd",
+    "category": "atta",
+    "declared_mrp": 620.0,
+    "net_quantity": "10kg"
+  },
+  "8901314010031": {
+    "product_name": "Sunfeast Dark Fantasy Choco Fills",
+    "manufacturer": "ITC Ltd",
+    "category": "biscuits",
+    "declared_mrp": 40.0,
+    "net_quantity": "75g"
+  },
+  "8901314010048": {
+    "product_name": "Sunfeast Mom's Magic Cashew & Almond",
+    "manufacturer": "ITC Ltd",
+    "category": "biscuits",
+    "declared_mrp": 30.0,
+    "net_quantity": "120g"
+  },
+  "8901314010055": {
+    "product_name": "Bingo! Mad Angles Achaari Masti",
+    "manufacturer": "ITC Ltd",
+    "category": "snacks",
+    "declared_mrp": 20.0,
+    "net_quantity": "66g"
+  },
+  "8901314010062": {
+    "product_name": "Yippee! Magic Masala Instant Noodles",
+    "manufacturer": "ITC Ltd",
+    "category": "noodles",
+    "declared_mrp": 15.0,
+    "net_quantity": "70g"
+  },
+  "8901314010079": {
+    "product_name": "Savlon Moisture Shield Germ Protection Soap",
+    "manufacturer": "ITC Ltd",
+    "category": "soap",
+    "declared_mrp": 40.0,
+    "net_quantity": "125g"
+  },
+  "8901207010014": {
+    "product_name": "Colgate Strong Teeth Dental Paste",
+    "manufacturer": "Colgate-Palmolive (India) Ltd",
+    "category": "toothpaste",
+    "declared_mrp": 120.0,
+    "net_quantity": "200g"
+  },
+  "8901207010021": {
+    "product_name": "Colgate MaxFresh Peppermint Ice",
+    "manufacturer": "Colgate-Palmolive (India) Ltd",
+    "category": "toothpaste",
+    "declared_mrp": 105.0,
+    "net_quantity": "150g"
+  },
+  "8901207010038": {
+    "product_name": "Colgate Total 12 Pro Gum Health",
+    "manufacturer": "Colgate-Palmolive (India) Ltd",
+    "category": "toothpaste",
+    "declared_mrp": 160.0,
+    "net_quantity": "120g"
+  },
+  "8901207010045": {
+    "product_name": "Palmolive Aroma Sensations Body Wash",
+    "manufacturer": "Colgate-Palmolive (India) Ltd",
+    "category": "body_wash",
+    "declared_mrp": 199.0,
+    "net_quantity": "250ml"
+  },
+  "8901262010011": {
+    "product_name": "Amul Pure Ghee Poly Pack",
+    "manufacturer": "Gujarat Cooperative Milk Marketing Federation Ltd",
+    "category": "ghee",
+    "declared_mrp": 590.0,
+    "net_quantity": "1L"
+  },
+  "8901262010028": {
+    "product_name": "Amul Butter Pasteurized",
+    "manufacturer": "Gujarat Cooperative Milk Marketing Federation Ltd",
+    "category": "butter",
+    "declared_mrp": 58.0,
+    "net_quantity": "100g"
+  },
+  "8901262010035": {
+    "product_name": "Amul Butter Pasteurized Family Pack",
+    "manufacturer": "Gujarat Cooperative Milk Marketing Federation Ltd",
+    "category": "butter",
+    "declared_mrp": 275.0,
+    "net_quantity": "500g"
+  },
+  "8901262010042": {
+    "product_name": "Amul Taaza Homogenised Toned Milk",
+    "manufacturer": "Gujarat Cooperative Milk Marketing Federation Ltd",
+    "category": "milk",
+    "declared_mrp": 72.0,
+    "net_quantity": "1L"
+  },
+  "8901262010059": {
+    "product_name": "Amul Processed Cheese Block",
+    "manufacturer": "Gujarat Cooperative Milk Marketing Federation Ltd",
+    "category": "cheese",
+    "declared_mrp": 135.0,
+    "net_quantity": "200g"
+  },
+  "8901499010017": {
+    "product_name": "Haldiram's Nagpur Bhujia Sev",
+    "manufacturer": "Haldiram Foods International Pvt Ltd",
+    "category": "snacks",
+    "declared_mrp": 55.0,
+    "net_quantity": "200g"
+  },
+  "8901499010024": {
+    "product_name": "Haldiram's All in One Mixture",
+    "manufacturer": "Haldiram Foods International Pvt Ltd",
+    "category": "snacks",
+    "declared_mrp": 60.0,
+    "net_quantity": "200g"
+  },
+  "8901499010031": {
+    "product_name": "Haldiram's Khatta Meetha",
+    "manufacturer": "Haldiram Foods International Pvt Ltd",
+    "category": "snacks",
+    "declared_mrp": 50.0,
+    "net_quantity": "200g"
+  },
+  "8901499010048": {
+    "product_name": "Haldiram's Gulab Jamun Tin",
+    "manufacturer": "Haldiram Foods International Pvt Ltd",
+    "category": "sweets",
+    "declared_mrp": 240.0,
+    "net_quantity": "1kg"
+  },
+  "8901499010055": {
+    "product_name": "Haldiram's Rasgulla Tin",
+    "manufacturer": "Haldiram Foods International Pvt Ltd",
+    "category": "sweets",
+    "declared_mrp": 220.0,
+    "net_quantity": "1kg"
+  },
+  "8901042971017": {
+    "product_name": "Dabur Red Ayurvedic Toothpaste",
+    "manufacturer": "Dabur India Ltd",
+    "category": "toothpaste",
+    "declared_mrp": 115.0,
+    "net_quantity": "150g"
+  },
+  "8901042971024": {
+    "product_name": "Dabur Honey 100% Pure",
+    "manufacturer": "Dabur India Ltd",
+    "category": "honey",
+    "declared_mrp": 230.0,
+    "net_quantity": "500g"
+  },
+  "8901042971031": {
+    "product_name": "Dabur Chyawanprash 2X Immunity",
+    "manufacturer": "Dabur India Ltd",
+    "category": "health_supplement",
+    "declared_mrp": 395.0,
+    "net_quantity": "1kg"
+  },
+  "8901042971048": {
+    "product_name": "Dabur Amla Hair Oil",
+    "manufacturer": "Dabur India Ltd",
+    "category": "hair_oil",
+    "declared_mrp": 140.0,
+    "net_quantity": "275ml"
+  },
+  "8901042971055": {
+    "product_name": "Real Fruit Power Mixed Fruit Juice",
+    "manufacturer": "Dabur India Ltd",
+    "category": "juice",
+    "declared_mrp": 125.0,
+    "net_quantity": "1L"
+  },
+  "8901088010012": {
+    "product_name": "Fortune Sunlite Refined Sunflower Oil",
+    "manufacturer": "Adani Wilmar Ltd",
+    "category": "edible_oil",
+    "declared_mrp": 165.0,
+    "net_quantity": "1L"
+  },
+  "8901088010029": {
+    "product_name": "Fortune Kachi Ghani Pure Mustard Oil",
+    "manufacturer": "Adani Wilmar Ltd",
+    "category": "edible_oil",
+    "declared_mrp": 180.0,
+    "net_quantity": "1L"
+  },
+  "8901088010036": {
+    "product_name": "Fortune Chakki Fresh Atta",
+    "manufacturer": "Adani Wilmar Ltd",
+    "category": "atta",
+    "declared_mrp": 290.0,
+    "net_quantity": "5kg"
+  },
+  "8901088010043": {
+    "product_name": "Fortune Soya Badi Chunks",
+    "manufacturer": "Adani Wilmar Ltd",
+    "category": "soya",
+    "declared_mrp": 50.0,
+    "net_quantity": "200g"
+  },
+  "8901088010050": {
+    "product_name": "Fortune Everyday Basmati Rice",
+    "manufacturer": "Adani Wilmar Ltd",
+    "category": "rice",
+    "declared_mrp": 450.0,
+    "net_quantity": "5kg"
+  },
+  "8901725010019": {
+    "product_name": "Marico Parachute 100% Pure Coconut Oil",
+    "manufacturer": "Marico Ltd",
+    "category": "hair_oil",
+    "declared_mrp": 135.0,
+    "net_quantity": "300ml"
+  },
+  "8901725010026": {
+    "product_name": "Saffola Gold Pro Healthy Lifestyle Oil",
+    "manufacturer": "Marico Ltd",
+    "category": "edible_oil",
+    "declared_mrp": 215.0,
+    "net_quantity": "1L"
+  },
+  "8901725010033": {
+    "product_name": "Saffola Masala Oats Classic Masala",
+    "manufacturer": "Marico Ltd",
+    "category": "cereals",
+    "declared_mrp": 40.0,
+    "net_quantity": "100g"
+  },
+  "8901725010040": {
+    "product_name": "Livon Anti-Frizz Hair Serum",
+    "manufacturer": "Marico Ltd",
+    "category": "hair_care",
+    "declared_mrp": 150.0,
+    "net_quantity": "50ml"
+  },
+  "8901725010057": {
+    "product_name": "Set Wet Cool Avatar Hair Gel",
+    "manufacturer": "Marico Ltd",
+    "category": "hair_care",
+    "declared_mrp": 110.0,
+    "net_quantity": "100ml"
+  },
+  "8901808010013": {
+    "product_name": "Patanjali Dant Kanti Ayurvedic Dental Cream",
+    "manufacturer": "Patanjali Ayurved Ltd",
+    "category": "toothpaste",
+    "declared_mrp": 100.0,
+    "net_quantity": "200g"
+  },
+  "8901808010020": {
+    "product_name": "Patanjali Cow Ghee",
+    "manufacturer": "Patanjali Ayurved Ltd",
+    "category": "ghee",
+    "declared_mrp": 630.0,
+    "net_quantity": "1L"
+  },
+  "8901808010037": {
+    "product_name": "Patanjali Aloe Vera Gel 90% Pure",
+    "manufacturer": "Patanjali Ayurved Ltd",
+    "category": "skin_care",
+    "declared_mrp": 90.0,
+    "net_quantity": "150ml"
+  },
+  "8901808010044": {
+    "product_name": "Patanjali Pure Honey",
+    "manufacturer": "Patanjali Ayurved Ltd",
+    "category": "honey",
+    "declared_mrp": 190.0,
+    "net_quantity": "500g"
+  },
+  "8901808010051": {
+    "product_name": "Patanjali Kesh Kanti Herbal Shampoo",
+    "manufacturer": "Patanjali Ayurved Ltd",
+    "category": "shampoo",
+    "declared_mrp": 120.0,
+    "net_quantity": "200ml"
+  },
+  "8901072001012": {
+    "product_name": "Cadbury Dairy Milk Silk Chocolate",
+    "manufacturer": "Mondelez India Foods Pvt Ltd",
+    "category": "chocolate",
+    "declared_mrp": 80.0,
+    "net_quantity": "60g"
+  },
+  "8901072001029": {
+    "product_name": "Cadbury Dairy Milk Roasted Almond",
+    "manufacturer": "Mondelez India Foods Pvt Ltd",
+    "category": "chocolate",
+    "declared_mrp": 50.0,
+    "net_quantity": "36g"
+  },
+  "8901072001036": {
+    "product_name": "Bournvita 5-Star Magic Health Drink",
+    "manufacturer": "Mondelez India Foods Pvt Ltd",
+    "category": "health_drink",
+    "declared_mrp": 265.0,
+    "net_quantity": "500g"
+  },
+  "8901072001043": {
+    "product_name": "Oreo Original Vanilla Creme Cookies",
+    "manufacturer": "Mondelez India Foods Pvt Ltd",
+    "category": "biscuits",
+    "declared_mrp": 35.0,
+    "net_quantity": "120g"
+  },
+  "8901072001050": {
+    "product_name": "Cadbury 5 Star Chocolate Bar",
+    "manufacturer": "Mondelez India Foods Pvt Ltd",
+    "category": "chocolate",
+    "declared_mrp": 20.0,
+    "net_quantity": "40g"
+  },
+  "8901023010018": {
+    "product_name": "Godrej No.1 Lime & Aloe Vera Soap",
+    "manufacturer": "Godrej Consumer Products Ltd",
+    "category": "soap",
+    "declared_mrp": 120.0,
+    "net_quantity": "400g"
+  },
+  "8901023010025": {
+    "product_name": "GoodKnight Gold Flash Mosquito Liquid Refill",
+    "manufacturer": "Godrej Consumer Products Ltd",
+    "category": "mosquito_repellent",
+    "declared_mrp": 85.0,
+    "net_quantity": "45ml"
+  },
+  "8901023010032": {
+    "product_name": "Godrej Expert Rich Creme Hair Colour",
+    "manufacturer": "Godrej Consumer Products Ltd",
+    "category": "hair_colour",
+    "declared_mrp": 35.0,
+    "net_quantity": "40ml"
+  },
+  "8901023010049": {
+    "product_name": "Cinthol Original Bath Soap",
+    "manufacturer": "Godrej Consumer Products Ltd",
+    "category": "soap",
+    "declared_mrp": 48.0,
+    "net_quantity": "100g"
+  },
+  "8901023010056": {
+    "product_name": "Godrej aer Pocket Bathroom Fragrance",
+    "manufacturer": "Godrej Consumer Products Ltd",
+    "category": "air_freshener",
+    "declared_mrp": 60.0,
+    "net_quantity": "10g"
+  },
+  "8901458010010": {
+    "product_name": "MDH Deggi Mirch Red Chilli Powder",
+    "manufacturer": "Mahashian Di Hatti Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 92.0,
+    "net_quantity": "100g"
+  },
+  "8901458010027": {
+    "product_name": "MDH Chana Masala Spice Blend",
+    "manufacturer": "Mahashian Di Hatti Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 82.0,
+    "net_quantity": "100g"
+  },
+  "8901458010034": {
+    "product_name": "MDH Garam Masala Premium Powder",
+    "manufacturer": "Mahashian Di Hatti Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 105.0,
+    "net_quantity": "100g"
+  },
+  "8901458010041": {
+    "product_name": "MDH Kasoori Methi Dried Fenugreek",
+    "manufacturer": "Mahashian Di Hatti Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 40.0,
+    "net_quantity": "25g"
+  },
+  "8901458010058": {
+    "product_name": "MDH Kitchen King All Purpose Blend",
+    "manufacturer": "Mahashian Di Hatti Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 85.0,
+    "net_quantity": "100g"
+  },
+  "8901248010011": {
+    "product_name": "Everest Pav Bhaji Masala",
+    "manufacturer": "Everest Food Products Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 78.0,
+    "net_quantity": "100g"
+  },
+  "8901248010028": {
+    "product_name": "Everest Sambhar Masala",
+    "manufacturer": "Everest Food Products Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 72.0,
+    "net_quantity": "100g"
+  },
+  "8901248010035": {
+    "product_name": "Everest Chaat Masala",
+    "manufacturer": "Everest Food Products Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 65.0,
+    "net_quantity": "100g"
+  },
+  "8901248010042": {
+    "product_name": "Everest Shahi Biryani Masala",
+    "manufacturer": "Everest Food Products Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 90.0,
+    "net_quantity": "100g"
+  },
+  "8901248010059": {
+    "product_name": "Everest Turmeric Powder Haldi",
+    "manufacturer": "Everest Food Products Pvt Ltd",
+    "category": "spices",
+    "declared_mrp": 38.0,
+    "net_quantity": "100g"
+  },
+  "8901764010016": {
+    "product_name": "Bisleri Packaged Drinking Water",
+    "manufacturer": "Bisleri International Pvt Ltd",
+    "category": "mineral_water",
+    "declared_mrp": 20.0,
+    "net_quantity": "1L"
+  },
+  "8901764010023": {
+    "product_name": "Bisleri Mineral Water 500ml",
+    "manufacturer": "Bisleri International Pvt Ltd",
+    "category": "mineral_water",
+    "declared_mrp": 10.0,
+    "net_quantity": "500ml"
+  },
+  "8901764010030": {
+    "product_name": "Bisleri Vedica Natural Mountain Water",
+    "manufacturer": "Bisleri International Pvt Ltd",
+    "category": "mineral_water",
+    "declared_mrp": 60.0,
+    "net_quantity": "500ml"
+  },
+  "8901764010047": {
+    "product_name": "Bisleri Club Soda",
+    "manufacturer": "Bisleri International Pvt Ltd",
+    "category": "soda",
+    "declared_mrp": 20.0,
+    "net_quantity": "750ml"
+  },
+  "8901764010054": {
+    "product_name": "Bisleri Limonata Sparkling Lime Drink",
+    "manufacturer": "Bisleri International Pvt Ltd",
+    "category": "soft_drink",
+    "declared_mrp": 35.0,
+    "net_quantity": "300ml"
+  },
+  "8901725110018": {
+    "product_name": "Himalaya Purifying Neem Face Wash",
+    "manufacturer": "Himalaya Wellness Company",
+    "category": "face_wash",
+    "declared_mrp": 180.0,
+    "net_quantity": "150ml"
+  },
+  "8901725110025": {
+    "product_name": "Himalaya Anti-Hair Fall Shampoo",
+    "manufacturer": "Himalaya Wellness Company",
+    "category": "shampoo",
+    "declared_mrp": 220.0,
+    "net_quantity": "400ml"
+  },
+  "8901725110032": {
+    "product_name": "Himalaya Baby Lotion with Almond Oil",
+    "manufacturer": "Himalaya Wellness Company",
+    "category": "baby_care",
+    "declared_mrp": 165.0,
+    "net_quantity": "200ml"
+  },
+  "8901725110049": {
+    "product_name": "Himalaya Liv.52 Herbal Liver Support",
+    "manufacturer": "Himalaya Wellness Company",
+    "category": "health_supplement",
+    "declared_mrp": 150.0,
+    "net_quantity": "60 Tablets"
+  },
+  "8901725110056": {
+    "product_name": "Himalaya Complete Care Herbal Toothpaste",
+    "manufacturer": "Himalaya Wellness Company",
+    "category": "toothpaste",
+    "declared_mrp": 95.0,
+    "net_quantity": "150g"
+  },
+  "8901234567890": {
+    "product_name": "Tata Tea Gold (Official Test Sample)",
+    "manufacturer": "Tata Consumer Products Ltd",
+    "category": "tea",
+    "declared_mrp": 199.0,
+    "net_quantity": "500g"
+  },
+  "8909876543210": {
+    "product_name": "QuickBite Instant Noodles Test Sample",
+    "manufacturer": "QuickBite Foods Pvt Ltd",
+    "category": "noodles",
+    "declared_mrp": 15.0,
+    "net_quantity": "70g"
+  },
+  "8901122334455": {
+    "product_name": "FreshWash Detergent Powder Test Sample",
+    "manufacturer": "FreshCare India Pvt Ltd",
+    "category": "detergent",
+    "declared_mrp": 190.0,
+    "net_quantity": "1kg"
+  },
+  "8905544332211": {
+    "product_name": "GlowFit Energy Nutrition Bar",
+    "manufacturer": "GlowFit Nutrition Ltd",
+    "category": "health_supplement",
+    "declared_mrp": 60.0,
+    "net_quantity": "50g"
+  },
+  "8906677889900": {
+    "product_name": "AquaPure Spring Water",
+    "manufacturer": "AquaPure Beverages Ltd",
+    "category": "mineral_water",
+    "declared_mrp": 20.0,
+    "net_quantity": "1L"
+  }
+}

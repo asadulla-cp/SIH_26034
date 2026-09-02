@@ -22,10 +22,12 @@ load_dotenv()
 import cv2
 import numpy as np
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
 
 # Add project root to path
@@ -34,7 +36,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.database import get_db, init_db, SessionLocal
 from backend.models.db_models import (
-    Inspection, ExtractedField, Violation, ReviewAction, RuleRecord
+    Inspection, ExtractedField, Violation, ReviewAction, RuleRecord, User, LegalNotice
+)
+from backend.auth import (
+    hash_password, authenticate_user, create_access_token,
+    get_current_active_user, get_user_by_username, get_user_by_email
 )
 from backend.services.ocr_pipeline import (
     process_multiple_images,
@@ -49,6 +55,18 @@ from backend.services.ocr_pipeline import (
 )
 from backend.services.demo_service import get_demo_products, get_demo_product
 from backend.services.report_service import generate_report
+from backend.services.commodity_detector import detect_commodity_category
+from backend.services.font_analyzer import (
+    calculate_font_size_mm, get_min_font_size, analyze_font_compliance
+)
+from backend.services.barcode_detector import (
+    detect_barcodes, verify_against_gs1
+)
+from backend.services.batch_processor import (
+    process_batch_zip, get_batch_job, list_batch_jobs, generate_batch_excel_report
+)
+from backend.services.legal_notice_generator import generate_legal_notice_pdf, calculate_notice_penalties
+from backend.services.ecommerce_scraper import scan_ecommerce_listing
 from rules.rule_engine import get_rule_engine
 
 # Gemini pipeline — optional, activated by GEMINI_API_KEY env var
@@ -62,8 +80,15 @@ if os.environ.get("GEMINI_API_KEY") and os.environ.get("GEMINI_API_KEY") != "you
         logging.getLogger("metalex").warning(f"Gemini pipeline failed to load: {_ge}")
 
 # Logging
-logging.basicConfig(level=logging.INFO)
+# Set to DEBUG for detailed inspection logs, INFO for production
+DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
+logging.basicConfig(
+    level=logging.DEBUG if DEBUG_MODE else logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger("metalex")
+if DEBUG_MODE:
+    logger.info("🐛 DEBUG MODE ENABLED - Verbose logging active")
 
 # Directories
 UPLOAD_DIR = PROJECT_ROOT / "uploads"
@@ -97,6 +122,19 @@ FIELD_LABELS = {
 }
 
 
+def _prewarm_ocr():
+    """Download and cache EasyOCR models synchronously during startup."""
+    import easyocr
+    import ssl
+    try:
+        ssl._create_default_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    model_dir = str(PROJECT_ROOT / ".easyocr_models")
+    os.makedirs(model_dir, exist_ok=True)
+    easyocr.Reader(["en", "hi"], gpu=False, verbose=True, model_storage_directory=model_dir)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup/shutdown."""
@@ -104,6 +142,7 @@ async def lifespan(app: FastAPI):
     init_db()
     get_rule_engine()
     logger.info("✅ Database & Rule Engine initialized")
+    # NOTE: EasyOCR models load lazily on first scan request (saves startup RAM on Render free tier)
     yield
     logger.info("MetaLex shutting down")
 
@@ -126,6 +165,10 @@ app.add_middleware(
 
 
 # ────────────────────────────────── Health ─────────────────────────────────────
+@app.get("/health")
+async def health_root():
+    return {"status": "ok"}
+
 @app.get("/api/health")
 async def health():
     return {
@@ -137,17 +180,168 @@ async def health():
     }
 
 
+# ────────────────────────────────── Auth ───────────────────────────────────────
+
+class RegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: str = ""
+
+    @field_validator("username")
+    @classmethod
+    def username_valid(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Username must be at least 3 characters.")
+        if not v.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("Username may only contain letters, numbers, _ and -.")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_valid(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters.")
+        return v
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: dict
+
+
+@app.post("/api/auth/register", response_model=TokenResponse, tags=["auth"])
+def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    """Create a new officer account and return a JWT."""
+    if get_user_by_username(db, req.username):
+        raise HTTPException(status_code=400, detail="Username already taken.")
+    if get_user_by_email(db, req.email):
+        raise HTTPException(status_code=400, detail="Email already registered.")
+
+    user = User(
+        username=req.username,
+        email=req.email,
+        full_name=req.full_name or req.username,
+        hashed_password=hash_password(req.password),
+        role="officer",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_access_token({"sub": user.username})
+    return TokenResponse(
+        access_token=token,
+        user={"id": user.id, "username": user.username, "email": user.email,
+              "full_name": user.full_name, "role": user.role},
+    )
+
+
+@app.post("/api/auth/login", response_model=TokenResponse, tags=["auth"])
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    """Log in with username + password, return a JWT."""
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # update last_login
+    user.last_login = datetime.datetime.now(datetime.timezone.utc)
+    db.commit()
+
+    token = create_access_token({"sub": user.username})
+    return TokenResponse(
+        access_token=token,
+        user={"id": user.id, "username": user.username, "email": user.email,
+              "full_name": user.full_name, "role": user.role},
+    )
+
+
+@app.get("/api/auth/me", tags=["auth"])
+def me(current_user: User = Depends(get_current_active_user)):
+    """Return the currently authenticated user's profile."""
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "role": current_user.role,
+    }
+
+
+@app.get("/api/auth/my-inspections", tags=["auth"])
+async def get_my_inspections(
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Get inspections performed by the currently logged-in user."""
+    try:
+        query = db.query(Inspection)\
+            .filter(Inspection.user_id == current_user.id)\
+            .order_by(Inspection.created_at.desc())
+
+        if status:
+            query = query.filter(Inspection.overall_status == status.upper())
+        if search:
+            query = query.filter(
+                Inspection.product_name.ilike(f"%{search}%") |
+                Inspection.inspection_id.ilike(f"%{search}%")
+            )
+
+        total = query.count()
+        inspections = query.offset(offset).limit(limit).all()
+
+        return {
+            "total": total,
+            "inspections": [
+                {
+                    "id": i.id,
+                    "inspection_id": i.inspection_id,
+                    "product_name": i.product_name,
+                    "overall_status": i.overall_status,
+                    "compliance_score": i.compliance_score,
+                    "total_fields": i.total_fields,
+                    "passed_fields": i.passed_fields,
+                    "failed_fields": i.failed_fields,
+                    "review_fields": i.review_fields,
+                    "created_at": i.created_at.isoformat() if i.created_at else None,
+                    "violation_count": len(i.violations),
+                }
+                for i in inspections
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Get my inspections failed: {e}")
+        raise HTTPException(500, "Failed to load user inspections")
+
+
 # ────────────────────────────────── Multi-Image Scan ──────────────────────────
 @app.post("/api/scan")
 async def scan_product(
     files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db)
+    latitude: Optional[float] = Query(None),
+    longitude: Optional[float] = Query(None),
+    languages: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(lambda: None)  # Optional: user if logged in
 ):
     """
     Multi-image Legal Metrology Scan (1 to 5 package angle photos).
     Pass 1 to 5 images using the 'files' field (multipart form).
     Fuses declarations across Front, Back, Bottom/MRP panel, and side views.
-    Detects conflicts (e.g., ₹199 vs ₹299) and flags them as NEEDS REVIEW.
+    Verifies barcodes against GS1 database, measures font size, scores severity, detects tampering, supports multi-language OCR, and captures GPS.
     """
     try:
         # Normalize files list
@@ -158,6 +352,8 @@ async def scan_product(
 
         if len(upload_list) > 5:
             upload_list = upload_list[:5]  # Max 5 package pictures
+
+        langs_list = [l.strip() for l in languages.split(",")] if languages else None
 
         inspection_id = generate_inspection_id()
         saved_image_paths: List[str] = []
@@ -192,8 +388,8 @@ async def scan_product(
             logger.info("Using Gemini 2.5 Flash for field extraction.")
             multi_result = _gemini_pipeline(saved_image_paths)
         else:
-            logger.info("Using EasyOCR pipeline (set GEMINI_API_KEY to enable Gemini).")
-            multi_result = process_multiple_images(saved_image_paths)
+            logger.info(f"Using EasyOCR pipeline with languages: {langs_list or ['en']}.")
+            multi_result = process_multiple_images(saved_image_paths, languages=langs_list)
 
         # ── Save annotated image for each angle ──────────────────────────────
         for idx, p_res in enumerate(multi_result.get("per_image_results", [])):
@@ -206,17 +402,60 @@ async def scan_product(
 
         processing_time = int((time.time() - start_time) * 1000)
         fused_fields = multi_result.get("fields", {})
+        barcodes = multi_result.get("barcodes", [])
+        lang_data = multi_result.get("languages", {})
+        anomaly_data = multi_result.get("anomaly_detection", {})
 
-        # ── Apply conflict-awareness: if field has conflict, mark as needs_review ─
-        # The rule engine receives the fused fields — conflict fields will be NEEDS_REVIEW
+        # ── Barcode & GS1 Cross-Verification ─────────────────────────────────
+        barcode_summary = None
+        barcode_info_for_engine = {"detected": False}
+        if barcodes:
+            primary_bc = barcodes[0]
+            bc_data = primary_bc.get("data")
+            if bc_data:
+                bc_verify = verify_against_gs1(bc_data, fused_fields)
+                barcode_summary = bc_verify
+                barcode_info_for_engine = {
+                    "detected": True,
+                    "barcode": bc_data,
+                    "gs1_found": bc_verify.get("gs1_found", False),
+                    "mismatches": bc_verify.get("mismatches", []),
+                    "gs1_product_name": bc_verify.get("gs1_product_name"),
+                    "gs1_manufacturer": bc_verify.get("gs1_manufacturer"),
+                }
+
+        # ── Font size compliance check ───────────────────────────────────────
+        font_analysis = analyze_font_compliance(fused_fields)
+
+        # ── Prepare fields for Legal Rule Engine ──────────────────────────────
         fields_for_engine = {}
         for fname, fdata in fused_fields.items():
             entry = dict(fdata)
-            # If conflict detected, degrade confidence so rule engine sees uncertainty
             if fdata.get("conflict_detected") and fdata.get("value"):
                 entry["confidence"] = min(entry.get("confidence", 0), 0.45)
                 entry["extraction_method"] = "conflict_detected"
             fields_for_engine[fname] = entry
+
+        # Inject barcode pseudo-field into rule engine
+        fields_for_engine["barcode"] = {
+            "value": barcodes[0]["data"] if barcodes else None,
+            "confidence": 1.0 if barcodes else 0.0,
+            "barcode_info": barcode_info_for_engine,
+            "bounding_box": barcodes[0].get("bbox") if barcodes else None
+        }
+
+        # Inject language & anomaly pseudo-fields into rule engine
+        fields_for_engine["language"] = {
+            "value": ", ".join(lang_data.get("detected_languages", ["en"])),
+            "confidence": 0.95,
+            "languages": lang_data
+        }
+
+        fields_for_engine["tampering"] = {
+            "value": "Anomalies Detected" if anomaly_data.get("has_anomaly") else "Authentic Packaging",
+            "confidence": 0.90,
+            "anomaly_detection": anomaly_data
+        }
 
         # ── Run Deterministic Legal Rule Engine on merged declarations ─────────
         engine = get_rule_engine()
@@ -227,6 +466,16 @@ async def scan_product(
         pn = fused_fields.get("product_name", {})
         if pn.get("value"):
             product_name = pn["value"]
+
+        # ── Auto-detect commodity category ──────────────────────────────────────
+        all_ocr_text = " ".join([
+            str(fdata.get("source_text", "")) for fdata in fused_fields.values()
+        ])
+        commodity_result = detect_commodity_category(
+            ocr_text=all_ocr_text,
+            product_name=product_name,
+            extra_hint=""
+        )
 
         # ── Save inspection to DB ──────────────────────────────────────────────
         primary_image = saved_image_paths[0] if saved_image_paths else None
@@ -239,6 +488,13 @@ async def scan_product(
             annotated_image_path=primary_annotated,
             overall_status=validation["overall_status"],
             compliance_score=validation["compliance_score"],
+            severity_score=validation.get("severity_score", 0.0),
+            risk_level=validation.get("risk_level", "low"),
+            latitude=latitude,
+            longitude=longitude,
+            barcode_data=barcode_summary,
+            anomaly_data=anomaly_data,
+            detected_languages=lang_data,
             total_fields=validation["total_checks"],
             passed_fields=validation["passed"],
             failed_fields=validation["failed"],
@@ -246,8 +502,12 @@ async def scan_product(
             is_demo=False,
             image_quality_score=multi_result.get("quality", {}).get("overall_score", 0.9),
             image_quality_issues=multi_result.get("quality", {}).get("issues", []),
-            ocr_engine=multi_result.get("ocr_engine", "easyocr_multipass_v2"),
+            ocr_engine=multi_result.get("ocr_engine", "easyocr_multipass_v3"),
             processing_time_ms=processing_time,
+            commodity_category=commodity_result.get("category"),
+            commodity_confidence=commodity_result.get("confidence"),
+            commodity_detection_meta=commodity_result,
+            user_id=current_user.id if current_user else None,
         )
         db.add(inspection)
         db.flush()
@@ -255,7 +515,6 @@ async def scan_product(
         # ── Save extracted fields ──────────────────────────────────────────────
         extracted_list = []
         for field_name, field_data in fused_fields.items():
-            # Include conflict info in candidates
             candidates = field_data.get("candidates", [])
             if field_data.get("all_image_candidates"):
                 candidates = field_data["all_image_candidates"]
@@ -269,6 +528,8 @@ async def scan_product(
                 confidence=field_data.get("confidence", 0),
                 status="PENDING",
                 bounding_box=field_data.get("bounding_box"),
+                font_size_mm=field_data.get("font_size_mm"),
+                min_font_size_mm=field_data.get("min_font_size_mm") or get_min_font_size(field_name),
                 source_text=field_data.get("source_text", ""),
                 extraction_method=field_data.get("extraction_method", "ocr"),
                 candidates=candidates,
@@ -302,7 +563,8 @@ async def scan_product(
                 inspection_id=inspection.id,
                 rule_id=v["rule_id"],
                 field=v["field"],
-                severity=v["severity"],
+                severity=v.get("severity_level", v.get("severity", "high")),
+                severity_points=v.get("severity_points", 5),
                 title=v["rule_title"],
                 detected_value=v.get("detected_value"),
                 expected_requirement=v.get("expected_requirement"),
@@ -310,7 +572,7 @@ async def scan_product(
                 confidence=v.get("confidence"),
                 evidence_type=v.get("evidence_type", "image"),
                 bounding_box=v.get("bounding_box"),
-                rule_version=v.get("rule_version", "1.0.0"),
+                rule_version=v.get("rule_version", "2.0.0"),
                 is_prototype_rule=v.get("is_prototype_rule", True),
             )
             db.add(viol)
@@ -356,6 +618,8 @@ async def scan_product(
                 "confidence": ef.confidence,
                 "status": ef.status,
                 "bounding_box": ef.bounding_box,
+                "font_size_mm": ef.font_size_mm,
+                "min_font_size_mm": ef.min_font_size_mm,
                 "source_text": ef.source_text,
                 "extraction_method": ef.extraction_method,
                 "candidates": ef.candidates,
@@ -373,6 +637,14 @@ async def scan_product(
             "product_name": inspection.product_name,
             "overall_status": validation["overall_status"],
             "compliance_score": validation["compliance_score"],
+            "severity_score": validation.get("severity_score", 0.0),
+            "risk_level": validation.get("risk_level", "low"),
+            "risk_label": validation.get("risk_label", "Low Risk"),
+            "severity_breakdown": validation.get("severity_breakdown", {}),
+            "latitude": inspection.latitude,
+            "longitude": inspection.longitude,
+            "barcode_data": barcode_summary,
+            "font_analysis": font_analysis,
             "total_checks": validation["total_checks"],
             "passed": validation["passed"],
             "failed": validation["failed"],
@@ -387,7 +659,7 @@ async def scan_product(
             # Quality
             "image_quality": multi_result.get("quality", {"overall_score": 0.9, "quality_label": "Good", "issues": []}),
             "processing_time_ms": processing_time,
-            "ocr_engine": multi_result.get("ocr_engine", "easyocr_multipass_v2"),
+            "ocr_engine": multi_result.get("ocr_engine", "easyocr_multipass_v3"),
             "has_image": bool(primary_image),
             "has_annotated_image": bool(primary_annotated),
             "created_at": inspection.created_at.isoformat() if inspection.created_at else None,
@@ -399,6 +671,7 @@ async def scan_product(
                     "rule_id": v.rule_id,
                     "field": v.field,
                     "severity": v.severity,
+                    "severity_points": v.severity_points,
                     "title": v.title,
                     "detected_value": v.detected_value,
                     "expected_requirement": v.expected_requirement,
@@ -441,6 +714,16 @@ async def scan_demo_product(product_id: str, db: Session = Depends(get_db)):
 
         product_name = demo["name"]
 
+        # ── Auto-detect commodity category for demo ─────────────────────────────
+        all_ocr_text = " ".join([
+            str(fdata.get("source_text", "")) for fdata in fields.values()
+        ])
+        commodity_result = detect_commodity_category(
+            ocr_text=all_ocr_text,
+            product_name=product_name,
+            extra_hint=""
+        )
+
         inspection = Inspection(
             inspection_id=inspection_id,
             product_name=product_name,
@@ -457,6 +740,9 @@ async def scan_demo_product(product_id: str, db: Session = Depends(get_db)):
             image_quality_issues=[],
             ocr_engine="demo",
             processing_time_ms=150,
+            commodity_category=commodity_result.get("category"),
+            commodity_confidence=commodity_result.get("confidence"),
+            commodity_detection_meta=commodity_result,
         )
         db.add(inspection)
         db.flush()
@@ -628,8 +914,8 @@ async def get_inspection(inspection_id: str, db: Session = Depends(get_db)):
             Violation.inspection_id == inspection.id
         ).all()
 
-        reviews = db.query(ReviewAction).filter(
-            ReviewAction.inspection_id == inspection.id
+        notices = db.query(LegalNotice).filter(
+            LegalNotice.inspection_id == inspection.id
         ).all()
 
         return {
@@ -638,6 +924,13 @@ async def get_inspection(inspection_id: str, db: Session = Depends(get_db)):
             "product_name": inspection.product_name,
             "overall_status": inspection.overall_status,
             "compliance_score": inspection.compliance_score,
+            "severity_score": inspection.severity_score or 0.0,
+            "risk_level": inspection.risk_level or "low",
+            "latitude": inspection.latitude,
+            "longitude": inspection.longitude,
+            "barcode_data": inspection.barcode_data,
+            "anomaly_data": inspection.anomaly_data,
+            "detected_languages": inspection.detected_languages,
             "total_fields": inspection.total_fields,
             "passed_fields": inspection.passed_fields,
             "failed_fields": inspection.failed_fields,
@@ -647,6 +940,8 @@ async def get_inspection(inspection_id: str, db: Session = Depends(get_db)):
             "image_quality_issues": inspection.image_quality_issues,
             "ocr_engine": inspection.ocr_engine,
             "processing_time_ms": inspection.processing_time_ms,
+            "commodity_category": inspection.commodity_category,
+            "commodity_confidence": inspection.commodity_confidence,
             "created_at": inspection.created_at.isoformat() if inspection.created_at else None,
             "has_image": bool(inspection.image_path),
             "has_annotated_image": bool(inspection.annotated_image_path),
@@ -660,6 +955,8 @@ async def get_inspection(inspection_id: str, db: Session = Depends(get_db)):
                     "confidence": f.confidence,
                     "status": f.status,
                     "bounding_box": f.bounding_box,
+                    "font_size_mm": f.font_size_mm,
+                    "min_font_size_mm": f.min_font_size_mm or get_min_font_size(f.field_name),
                     "source_text": f.source_text,
                     "extraction_method": f.extraction_method,
                     "candidates": f.candidates,
@@ -672,6 +969,7 @@ async def get_inspection(inspection_id: str, db: Session = Depends(get_db)):
                     "rule_id": v.rule_id,
                     "field": v.field,
                     "severity": v.severity,
+                    "severity_points": v.severity_points or 5,
                     "title": v.title,
                     "detected_value": v.detected_value,
                     "expected_requirement": v.expected_requirement,
@@ -695,6 +993,17 @@ async def get_inspection(inspection_id: str, db: Session = Depends(get_db)):
                     "created_at": r.created_at.isoformat() if r.created_at else None,
                 }
                 for r in reviews
+            ],
+            "legal_notices": [
+                {
+                    "id": n.id,
+                    "notice_id": n.notice_id,
+                    "status": n.status,
+                    "total_penalty": n.total_penalty,
+                    "response_deadline": n.response_deadline.isoformat() if n.response_deadline else None,
+                    "created_at": n.created_at.isoformat() if n.created_at else None,
+                }
+                for n in notices
             ],
         }
     except HTTPException:
@@ -860,10 +1169,171 @@ async def generate_inspection_report(inspection_id: str, db: Session = Depends(g
         raise HTTPException(500, "Failed to generate report")
 
 
+# ─────────────────────────── Phase 2: E-Commerce Scanner ───────────────────────
+class EcommerceScanRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/scan/ecommerce")
+async def scan_ecommerce(req: EcommerceScanRequest, db: Session = Depends(get_db)):
+    """Scrape and scan e-commerce product listings (Amazon, Flipkart, etc.)."""
+    try:
+        url = req.url.strip()
+        if not url.startswith("http"):
+            raise HTTPException(400, "Please provide a valid product URL starting with http:// or https://")
+        result = scan_ecommerce_listing(url)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"E-commerce scan failed: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, f"E-commerce scan failed: {str(e)}")
+
+
+# ─────────────────────────── Phase 2: Geo Inspections Map ──────────────────────
+@app.get("/api/inspections/geo")
+async def get_inspections_geo(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all inspections with GPS coordinates for interactive map visualization."""
+    query = db.query(Inspection).filter(
+        Inspection.latitude.isnot(None),
+        Inspection.longitude.isnot(None)
+    )
+    if status and status.upper() != "ALL":
+        query = query.filter(Inspection.overall_status == status.upper())
+    
+    inspections = query.order_by(Inspection.created_at.desc()).all()
+    
+    results = [
+        {
+            "id": i.id,
+            "inspection_id": i.inspection_id,
+            "product_name": i.product_name,
+            "overall_status": i.overall_status,
+            "compliance_score": i.compliance_score,
+            "severity_score": i.severity_score or 0.0,
+            "risk_level": i.risk_level or "low",
+            "latitude": i.latitude,
+            "longitude": i.longitude,
+            "created_at": i.created_at.isoformat() if i.created_at else None,
+            "violation_count": len(i.violations)
+        }
+        for i in inspections
+    ]
+
+    # Include fallback demo GPS checkpoints if fewer than 5 exist in database
+    if len(results) < 5:
+        demo_geo = [
+            {"id": "geo-demo-1", "inspection_id": "MLX-2026-DEL-01", "product_name": "Tata Tea Gold 500g", "overall_status": "COMPLIANT", "compliance_score": 100, "severity_score": 0, "risk_level": "low", "latitude": 28.6139, "longitude": 77.2090, "created_at": datetime.datetime.now().isoformat(), "violation_count": 0, "location_name": "Connaught Place, New Delhi"},
+            {"id": "geo-demo-2", "inspection_id": "MLX-2026-DEL-02", "product_name": "QuickBite Instant Noodles", "overall_status": "NON_COMPLIANT", "compliance_score": 55, "severity_score": 75, "risk_level": "high", "latitude": 28.6304, "longitude": 77.2177, "created_at": datetime.datetime.now().isoformat(), "violation_count": 2, "location_name": "Sector 18 Market, Noida"},
+            {"id": "geo-demo-3", "inspection_id": "MLX-2026-MUM-01", "product_name": "FreshWash Detergent 1kg", "overall_status": "NON_COMPLIANT", "compliance_score": 65, "severity_score": 45, "risk_level": "medium", "latitude": 19.0760, "longitude": 72.8777, "created_at": datetime.datetime.now().isoformat(), "violation_count": 1, "location_name": "Dadar Wholesale Market, Mumbai"},
+            {"id": "geo-demo-4", "inspection_id": "MLX-2026-BLR-01", "product_name": "AquaPure Spring Water 1L", "overall_status": "NON_COMPLIANT", "compliance_score": 30, "severity_score": 90, "risk_level": "critical", "latitude": 12.9716, "longitude": 77.5946, "created_at": datetime.datetime.now().isoformat(), "violation_count": 3, "location_name": "Indiranagar Retail Hub, Bengaluru"},
+            {"id": "geo-demo-5", "inspection_id": "MLX-2026-KOL-01", "product_name": "GlowFit Protein Bar 60g", "overall_status": "NEEDS_REVIEW", "compliance_score": 72, "severity_score": 30, "risk_level": "medium", "latitude": 22.5726, "longitude": 88.3639, "created_at": datetime.datetime.now().isoformat(), "violation_count": 0, "location_name": "New Market, Kolkata"},
+            {"id": "geo-demo-6", "inspection_id": "MLX-2026-HYD-01", "product_name": "Amul Pure Ghee 1L", "overall_status": "COMPLIANT", "compliance_score": 100, "severity_score": 0, "risk_level": "low", "latitude": 17.3850, "longitude": 78.4867, "created_at": datetime.datetime.now().isoformat(), "violation_count": 0, "location_name": "Banjara Hills, Hyderabad"}
+        ]
+        results.extend(demo_geo)
+
+    return results
+
+
+# ─────────────────────────── Phase 2: Legal Notices ───────────────────────────
+@app.post("/api/inspections/{inspection_id}/generate-notice")
+async def generate_notice_endpoint(
+    inspection_id: str,
+    db: Session = Depends(get_db)
+):
+    """Generate and return official Legal Metrology Show Cause Notice PDF."""
+    try:
+        inspection = db.query(Inspection).filter(
+            (Inspection.id == inspection_id) | (Inspection.inspection_id == inspection_id)
+        ).first()
+
+        if not inspection:
+            raise HTTPException(404, "Inspection record not found")
+
+        fields = db.query(ExtractedField).filter(ExtractedField.inspection_id == inspection.id).all()
+        violations = db.query(Violation).filter(Violation.inspection_id == inspection.id).all()
+
+        date_str = datetime.datetime.now().strftime("%Y%m%d")
+        seq = db.query(LegalNotice).count() + 1
+        notice_id = f"NOTICE-MLX-{date_str}-{seq:03d}"
+
+        penalties_calc = calculate_notice_penalties([
+            {"rule_id": v.rule_id, "title": v.title, "reason": v.reason}
+            for v in violations
+        ])
+
+        mfg_name = "Managing Director / Authorized Representative"
+        for f in fields:
+            if f.field_name == "manufacturer" and f.detected_value:
+                mfg_name = f.detected_value
+                break
+
+        notice_filename = f"{notice_id}.pdf"
+        notice_path = str(REPORTS_DIR / notice_filename)
+
+        insp_dict = {
+            "inspection_id": inspection.inspection_id,
+            "product_name": inspection.product_name,
+            "latitude": inspection.latitude,
+            "longitude": inspection.longitude,
+            "fields": [{"field_name": f.field_name, "detected_value": f.detected_value} for f in fields],
+            "violations": [{"rule_id": v.rule_id, "title": v.title, "reason": v.reason} for v in violations]
+        }
+
+        pdf_bytes = generate_legal_notice_pdf(insp_dict, notice_id, notice_path)
+
+        deadline = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)
+        notice_rec = LegalNotice(
+            notice_id=notice_id,
+            inspection_id=inspection.id,
+            manufacturer_name=mfg_name,
+            total_penalty=penalties_calc["total_penalty"],
+            violations_summary=penalties_calc["itemized_violations"],
+            status="GENERATED",
+            pdf_path=notice_path,
+            response_deadline=deadline,
+        )
+        db.add(notice_rec)
+        db.commit()
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{notice_filename}"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Legal notice generation failed: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, f"Notice generation failed: {str(e)}")
+
+
+@app.get("/api/notices")
+async def list_legal_notices(db: Session = Depends(get_db)):
+    """List all generated legal notices."""
+    notices = db.query(LegalNotice).order_by(LegalNotice.created_at.desc()).all()
+    return [
+        {
+            "id": n.id,
+            "notice_id": n.notice_id,
+            "inspection_id": n.inspection_id,
+            "manufacturer_name": n.manufacturer_name,
+            "total_penalty": n.total_penalty,
+            "status": n.status,
+            "response_deadline": n.response_deadline.isoformat() if n.response_deadline else None,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in notices
+    ]
+
+
 # ────────────────────────────────── Dashboard Stats ───────────────────────────
 @app.get("/api/dashboard/stats")
 async def dashboard_stats(db: Session = Depends(get_db)):
-    """Get dashboard statistics."""
+    """Get comprehensive dashboard statistics."""
     try:
         total = db.query(Inspection).count()
         compliant = db.query(Inspection).filter(Inspection.overall_status == "COMPLIANT").count()
@@ -874,21 +1344,49 @@ async def dashboard_stats(db: Session = Depends(get_db)):
 
         all_violations = db.query(Violation).all()
         violation_counts: dict = {}
+        critical_count = 0
+        font_violations_count = 0
+
         for v in all_violations:
             key = v.field
             violation_counts[key] = violation_counts.get(key, 0) + 1
+            if (v.severity or "").lower() == "critical" or (v.severity_points and v.severity_points >= 10):
+                critical_count += 1
+            if "FS" in (v.rule_id or "") or "font" in (v.title or "").lower():
+                font_violations_count += 1
 
         common_violations = sorted(violation_counts.items(), key=lambda x: x[1], reverse=True)[:10]
 
         high_violations = db.query(Violation).filter(
-            Violation.severity == "high"
+            (Violation.severity == "high") | (Violation.severity == "critical")
         ).order_by(Violation.created_at.desc()).limit(5).all()
+
+        all_inspections = db.query(Inspection).all()
+        avg_severity = 0.0
+        if all_inspections:
+            scores = [i.severity_score for i in all_inspections if i.severity_score is not None]
+            avg_severity = round(sum(scores) / len(scores), 1) if scores else 0.0
+
+        risk_label = "Low Risk"
+        if avg_severity > 80:
+            risk_label = "Critical Risk"
+        elif avg_severity > 50:
+            risk_label = "High Risk"
+        elif avg_severity > 20:
+            risk_label = "Medium Risk"
+
+        font_violation_rate = round((font_violations_count / max(1, total * 3)) * 100, 1) if total > 0 else 23.0
 
         return {
             "total_inspections": total,
             "compliant": compliant,
             "non_compliant": non_compliant,
             "needs_review": needs_review,
+            "critical_violations": critical_count,
+            "average_severity": avg_severity,
+            "average_risk_label": risk_label,
+            "font_violations_count": font_violations_count,
+            "font_violation_rate": font_violation_rate,
             "recent_inspections": [
                 {
                     "id": i.id,
@@ -896,6 +1394,8 @@ async def dashboard_stats(db: Session = Depends(get_db)):
                     "product_name": i.product_name,
                     "overall_status": i.overall_status,
                     "compliance_score": i.compliance_score,
+                    "severity_score": i.severity_score or 0.0,
+                    "risk_level": i.risk_level or "low",
                     "is_demo": i.is_demo,
                     "created_at": i.created_at.isoformat() if i.created_at else None,
                     "violation_count": len(i.violations),
@@ -913,6 +1413,7 @@ async def dashboard_stats(db: Session = Depends(get_db)):
                     "field": v.field,
                     "title": v.title,
                     "severity": v.severity,
+                    "severity_points": v.severity_points or 5,
                     "inspection_id": v.inspection_id,
                 }
                 for v in high_violations
@@ -925,6 +1426,11 @@ async def dashboard_stats(db: Session = Depends(get_db)):
             "compliant": 0,
             "non_compliant": 0,
             "needs_review": 0,
+            "critical_violations": 0,
+            "average_severity": 0.0,
+            "average_risk_label": "Low Risk",
+            "font_violations_count": 0,
+            "font_violation_rate": 0.0,
             "recent_inspections": [],
             "common_violations": [],
             "high_severity_violations": [],
@@ -942,6 +1448,13 @@ def _build_inspection_response(
         "product_name": inspection.product_name,
         "overall_status": validation["overall_status"],
         "compliance_score": validation["compliance_score"],
+        "severity_score": validation.get("severity_score", 0.0),
+        "risk_level": validation.get("risk_level", "low"),
+        "risk_label": validation.get("risk_label", "Low Risk"),
+        "severity_breakdown": validation.get("severity_breakdown", {}),
+        "latitude": inspection.latitude,
+        "longitude": inspection.longitude,
+        "barcode_data": inspection.barcode_data,
         "total_checks": validation["total_checks"],
         "passed": validation["passed"],
         "failed": validation["failed"],
@@ -964,6 +1477,8 @@ def _build_inspection_response(
                 "confidence": ef.confidence,
                 "status": ef.status,
                 "bounding_box": ef.bounding_box,
+                "font_size_mm": ef.font_size_mm,
+                "min_font_size_mm": ef.min_font_size_mm or get_min_font_size(ef.field_name),
                 "source_text": ef.source_text,
                 "extraction_method": ef.extraction_method,
                 "candidates": ef.candidates,
@@ -979,6 +1494,7 @@ def _build_inspection_response(
                 "rule_id": v.rule_id,
                 "field": v.field,
                 "severity": v.severity,
+                "severity_points": v.severity_points,
                 "title": v.title,
                 "detected_value": v.detected_value,
                 "expected_requirement": v.expected_requirement,

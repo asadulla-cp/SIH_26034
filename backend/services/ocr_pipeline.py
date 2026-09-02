@@ -17,18 +17,39 @@ from PIL import Image
 from typing import Optional, List, Dict, Any, Tuple
 import logging
 import time
+from backend.services.font_analyzer import (
+    calculate_font_size_mm, get_min_font_size, analyze_font_compliance
+)
+from backend.services.barcode_detector import (
+    detect_barcodes, verify_against_gs1
+)
+from backend.services.anomaly_detector import run_full_anomaly_detection
+from backend.services.image_forensics import analyze_image_authenticity
 
 logger = logging.getLogger("metalex.ocr")
 
-# EasyOCR reader cache
-_easyocr_reader = None
+# Multi-language EasyOCR reader cache
+_ocr_readers: Dict[tuple, Any] = {}
 _ocr_available = False
 
+SUPPORTED_LANGUAGES = ["en", "hi", "ta", "bn", "mr", "gu"]
 
-def _get_ocr_reader():
-    global _easyocr_reader, _ocr_available
-    if _easyocr_reader is not None:
-        return _easyocr_reader
+
+def _get_ocr_reader(languages: Optional[List[str]] = None):
+    global _ocr_readers, _ocr_available
+    if not languages:
+        langs_tuple = ("en",)
+    else:
+        valid_langs = [l.strip().lower() for l in languages if l.strip().lower() in SUPPORTED_LANGUAGES]
+        if not valid_langs:
+            valid_langs = ["en"]
+        if "en" not in valid_langs:
+            valid_langs.append("en")
+        langs_tuple = tuple(sorted(list(set(valid_langs))))
+
+    if langs_tuple in _ocr_readers:
+        return _ocr_readers[langs_tuple]
+
     try:
         import ssl
         try:
@@ -36,14 +57,83 @@ def _get_ocr_reader():
         except AttributeError:
             pass
         import easyocr
-        _easyocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        # Use the same model dir as the startup pre-warmer so models aren't re-downloaded
+        from pathlib import Path as _Path
+        _model_dir = str(_Path(__file__).parent.parent.parent / ".easyocr_models")
+        import os as _os
+        _os.makedirs(_model_dir, exist_ok=True)
+        reader = easyocr.Reader(list(langs_tuple), gpu=False, verbose=False, model_storage_directory=_model_dir)
+        _ocr_readers[langs_tuple] = reader
         _ocr_available = True
-        logger.info("EasyOCR initialized successfully")
-        return _easyocr_reader
+        logger.info(f"EasyOCR initialized successfully for languages: {langs_tuple}")
+        return reader
     except Exception as e:
-        logger.warning(f"EasyOCR initialization warning: {e}. Fallback pipeline active.")
+        logger.warning(f"EasyOCR initialization warning for {langs_tuple}: {e}. Fallback pipeline active.")
+        # Fallback to English if multi-lang fails
+        if langs_tuple != ("en",):
+            return _get_ocr_reader(["en"])
         _ocr_available = False
         return None
+
+
+def detect_text_languages(ocr_results: list) -> dict:
+    """
+    Detects Indian languages from Unicode scripts in the extracted OCR text.
+    """
+    scripts = {
+        "devanagari": 0,  # Hindi, Marathi
+        "tamil": 0,       # Tamil
+        "bengali": 0,     # Bengali
+        "gujarati": 0,    # Gujarati
+        "latin": 0,       # English
+        "digits": 0
+    }
+
+    all_text = " ".join([r.get("text", "") for r in ocr_results])
+
+    for char in all_text:
+        cp = ord(char)
+        if 0x0900 <= cp <= 0x097F:
+            scripts["devanagari"] += 1
+        elif 0x0B80 <= cp <= 0x0BFF:
+            scripts["tamil"] += 1
+        elif 0x0980 <= cp <= 0x09FF:
+            scripts["bengali"] += 1
+        elif 0x0A80 <= cp <= 0x0AFF:
+            scripts["gujarati"] += 1
+        elif (0x0041 <= cp <= 0x005A) or (0x0061 <= cp <= 0x007A):
+            scripts["latin"] += 1
+        elif 0x0030 <= cp <= 0x0039:
+            scripts["digits"] += 1
+
+    detected = []
+    if scripts["latin"] >= 5:
+        detected.append("en")
+    if scripts["devanagari"] >= 3:
+        detected.append("hi")
+    if scripts["tamil"] >= 3:
+        detected.append("ta")
+    if scripts["bengali"] >= 3:
+        detected.append("bn")
+    if scripts["gujarati"] >= 3:
+        detected.append("gu")
+
+    if not detected:
+        detected = ["en"]
+
+    has_english = "en" in detected
+    has_hindi = "hi" in detected
+    is_dual_language = has_english and has_hindi
+
+    return {
+        "detected_languages": detected,
+        "has_english": has_english,
+        "has_hindi": has_hindi,
+        "is_dual_language": is_dual_language,
+        "primary_language": "en" if scripts["latin"] >= scripts["devanagari"] else "hi",
+        "script_counts": scripts
+    }
+
 
 def is_ocr_available() -> bool:
     global _ocr_available
@@ -154,9 +244,9 @@ def preprocess_for_ocr(img: np.ndarray) -> List[np.ndarray]:
     return variants if variants else [img]
 
 # ──────────────────────────── OCR Execution ───────────────────────────────────
-def run_ocr(img: np.ndarray) -> list:
+def run_ocr(img: np.ndarray, languages: Optional[List[str]] = None) -> list:
     """Run multi-pass OCR on image with bounding box tracking and duplicate removal."""
-    reader = _get_ocr_reader()
+    reader = _get_ocr_reader(languages)
     if reader is None:
         return []
 
@@ -498,7 +588,7 @@ class ManufacturerDetector(BaseDetector):
             if any(re.search(p, text) for p in self.kws):
                 # Extract the entity name roughly
                 clean = block["text"]
-                clean = re.sub(r"^(.*?)(?i)(?:manufactured\s*(?:by|&)?|marketed\s*by|packed\s*by)\s*[:\-]*\s*", "", clean)
+                clean = re.sub(r"(?i)^(.*?)(?:manufactured\s*(?:by|&)?|marketed\s*by|packed\s*by)\s*[:\-]*\s*", "", clean)
                 # Take first line of the remaining block as manufacturer
                 lines = clean.split(" ")
                 val = " ".join(lines[:4]) # Heuristic
@@ -604,6 +694,15 @@ def extract_fields(ocr_results: list, img_shape: tuple) -> dict:
         else:
             fields["product_name"] = _empty_fields()["product_name"]
 
+    # Calculate Font Height in mm for all detected declarations
+    for fname, fdata in fields.items():
+        if fdata.get("bounding_box") and fdata.get("value"):
+            fdata["font_size_mm"] = calculate_font_size_mm(fdata["bounding_box"], img_shape)
+            fdata["min_font_size_mm"] = get_min_font_size(fname)
+        else:
+            fdata["font_size_mm"] = None
+            fdata["min_font_size_mm"] = get_min_font_size(fname)
+
     return fields
 
 def _detect_prominent_product_name(ocr_results: list, existing: dict, img_shape: tuple) -> Optional[dict]:
@@ -633,6 +732,8 @@ def _detect_prominent_product_name(ocr_results: list, existing: dict, img_shape:
                 "normalized_value": t.title(),
                 "confidence": round(item["confidence"], 3),
                 "bounding_box": bbox,
+                "font_size_mm": calculate_font_size_mm(bbox, img_shape),
+                "min_font_size_mm": get_min_font_size("product_name"),
                 "source_text": t,
                 "extraction_method": "spatial_headline_heuristic",
                 "candidates": [{"value": t, "confidence": item["confidence"], "score": round(score, 3), "reason": "Largest/topmost text block"}],
@@ -672,6 +773,8 @@ def _empty_fields() -> dict:
             "normalized_value": None,
             "confidence": 0.0,
             "bounding_box": None,
+            "font_size_mm": None,
+            "min_font_size_mm": get_min_font_size(k),
             "source_text": "",
             "extraction_method": "not_detected",
             "candidates": []
@@ -679,16 +782,28 @@ def _empty_fields() -> dict:
         for k in names
     }
 
-def create_annotated_image(img: np.ndarray, ocr_results: list, fields: dict, violations=None) -> np.ndarray:
+def create_annotated_image(img: np.ndarray, ocr_results: list, fields: dict, violations=None, barcodes=None) -> np.ndarray:
     annotated = img.copy()
     violation_fields = {v.get("field") for v in (violations or [])}
 
-    # For general OCR layer (draw faint boxes)
+    # 1. Faint grey bounding boxes for all OCR tokens
     for item in ocr_results:
         b = item["bbox_rect"]
-        cv2.rectangle(annotated, (b[0], b[1]), (b[2], b[3]), (230, 230, 230), 1)
+        cv2.rectangle(annotated, (b[0], b[1]), (b[2], b[3]), (220, 220, 220), 1)
 
-    # For Legal Declaration Evidence layer (draw strong boxes)
+    # 2. Highlight Barcodes & QR Codes with Cyan/Gold borders
+    if barcodes:
+        for bc in barcodes:
+            bbox = bc.get("bbox")
+            if bbox and len(bbox) >= 4:
+                cv2.rectangle(annotated, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255, 180, 0), 3)
+                bclabel = f"BARCODE: {bc.get('type', 'CODE')} ({bc.get('data', '')})"
+                (tw, th), _ = cv2.getTextSize(bclabel, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                y = max(bbox[1] - 4, th + 4)
+                cv2.rectangle(annotated, (bbox[0], y - th - 3), (bbox[0] + tw + 6, y + 2), (255, 180, 0), -1)
+                cv2.putText(annotated, bclabel, (bbox[0] + 3, y - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+
+    # 3. Highlight Legal Declarations with Font Size & Compliance Indicators
     for field_name, fdata in fields.items():
         bbox = fdata.get("bounding_box")
         if not bbox or len(bbox) < 4:
@@ -696,10 +811,32 @@ def create_annotated_image(img: np.ndarray, ocr_results: list, fields: dict, vio
 
         is_viol = field_name in violation_fields
         conf = fdata.get("confidence", 0)
-        color = (40, 40, 235) if is_viol else ((40, 200, 40) if conf >= 0.6 else (0, 165, 255))
+        font_sz = fdata.get("font_size_mm")
+        min_sz = fdata.get("min_font_size_mm", 1.0)
+        
+        is_undersized = font_sz is not None and font_sz < min_sz
+
+        # Color coding:
+        # Undersized font -> Orange (0, 140, 255)
+        # General Violation -> Red (40, 40, 235)
+        # Compliant high confidence -> Green (40, 200, 40)
+        # Needs review / medium confidence -> Amber (0, 180, 255)
+        if is_undersized:
+            color = (0, 120, 255)  # Orange for font violation
+            label = f"{field_name.replace('_', ' ').title()} ({font_sz}mm < {min_sz}mm ❌)"
+        elif is_viol:
+            color = (40, 40, 235)  # Red
+            label = f"{field_name.replace('_', ' ').title()} (Violation)"
+        elif conf >= 0.6:
+            color = (40, 200, 40)  # Green
+            font_str = f" [{font_sz}mm]" if font_sz else ""
+            label = f"{field_name.replace('_', ' ').title()} ({conf:.0%}){font_str}"
+        else:
+            color = (0, 180, 255)  # Amber
+            label = f"{field_name.replace('_', ' ').title()} ({conf:.0%})"
+
         cv2.rectangle(annotated, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 3)
 
-        label = f"{field_name.replace('_', ' ').title()} ({conf:.0%})"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
         y = max(bbox[1] - 4, th + 4)
         cv2.rectangle(annotated, (bbox[0], y - th - 3), (bbox[0] + tw + 6, y + 2), color, -1)
@@ -707,7 +844,7 @@ def create_annotated_image(img: np.ndarray, ocr_results: list, fields: dict, vio
 
     return annotated
 
-def process_single_image(image_path: str) -> dict:
+def process_single_image(image_path: str, languages: Optional[List[str]] = None) -> dict:
     img = None
     try:
         img = cv2.imread(image_path)
@@ -718,19 +855,47 @@ def process_single_image(image_path: str) -> dict:
         return {
             "success": False, "error": str(e), "ocr_results": [],
             "fields": _empty_fields(),
+            "barcodes": [],
+            "font_analysis": {},
+            "languages": {"detected_languages": ["en"], "has_english": True, "has_hindi": False, "is_dual_language": False},
+            "anomaly_detection": {"has_anomaly": False, "tampering_detected": False, "findings": []},
+            "forensics": {"verdict": "UNKNOWN", "authenticity_score": 0.0, "findings": []},
             "quality": {"overall_score": 0, "issues": ["Failed to read image"], "is_suitable": False, "quality_label": "Poor"},
         }
     quality = assess_image_quality(img)
-    ocr_results = run_ocr(img)
+    ocr_results = run_ocr(img, languages=languages)
     fields = extract_fields(ocr_results, img.shape)
-    annotated = create_annotated_image(img, ocr_results, fields)
+    barcodes = detect_barcodes(img)
+    font_analysis = analyze_font_compliance(fields, img.shape)
+    
+    # Phase 2: Multi-language detection & script analysis
+    lang_info = detect_text_languages(ocr_results)
+    
+    # Phase 2: Anomaly detection (MRP sticker, package damage, font inconsistency)
+    fields_list = [{"field_name": k, "bounding_box": v.get("bounding_box"), "value": v.get("value")} for k, v in fields.items()]
+    anomaly_res = run_full_anomaly_detection(img, fields_list)
+    
+    # Phase 2: Image forensics (ELA and digital tampering checks)
+    forensics_res = analyze_image_authenticity(img, file_path=image_path)
+    
+    annotated = create_annotated_image(img, ocr_results, fields, barcodes=barcodes)
     return {
-        "success": True, "quality": quality, "ocr_results": ocr_results,
-        "fields": fields, "annotated_image": annotated, "original_image": img, "ocr_text_count": len(ocr_results),
+        "success": True, 
+        "quality": quality, 
+        "ocr_results": ocr_results,
+        "fields": fields, 
+        "barcodes": barcodes,
+        "font_analysis": font_analysis,
+        "languages": lang_info,
+        "anomaly_detection": anomaly_res,
+        "forensics": forensics_res,
+        "annotated_image": annotated, 
+        "original_image": img, 
+        "ocr_text_count": len(ocr_results),
     }
 
-def process_image(image_path: str) -> dict:
-    return process_single_image(image_path)
+def process_image(image_path: str, languages: Optional[List[str]] = None) -> dict:
+    return process_single_image(image_path, languages=languages)
 
 def _fuse_field_candidates(field_name: str, per_image_candidates: list) -> dict:
     valid = [c for c in per_image_candidates if c.get("value")]
@@ -767,6 +932,8 @@ def _fuse_field_candidates(field_name: str, per_image_candidates: list) -> dict:
         "normalized_value": _normalize_field_value(field_name, best["value"]),
         "confidence": round(best.get("confidence", 0), 3),
         "bounding_box": best.get("bounding_box"),
+        "font_size_mm": best.get("font_size_mm"),
+        "min_font_size_mm": best.get("min_font_size_mm") or get_min_font_size(field_name),
         "source_text": best.get("source_text", ""),
         "extraction_method": best.get("extraction_method", "ocr_regex_spatial"),
         "candidates": [{"value": c["value"], "confidence": c["confidence"], "score": c["confidence"], "reason": c.get("reason", "")} for c in all_candidates[:5]],
@@ -777,16 +944,19 @@ def _fuse_field_candidates(field_name: str, per_image_candidates: list) -> dict:
         "needs_review_due_to_conflict": conflict_detected,
     }
 
-def process_multiple_images(image_paths: List[str]) -> dict:
+def process_multiple_images(image_paths: List[str], languages: Optional[List[str]] = None) -> dict:
     start = time.time()
     per_image_results = []
     overall_quality_scores = []
     all_quality_issues = []
+    all_barcodes = []
+    all_anomalies = []
+    detected_languages_all = set()
 
     for idx, path in enumerate(image_paths):
         image_number = idx + 1
         logger.info(f"Processing image {image_number}/{len(image_paths)}: {path}")
-        res = process_single_image(path)
+        res = process_single_image(path, languages=languages)
         res["image_index"] = idx
         res["image_number"] = image_number
         res["image_path"] = path
@@ -794,6 +964,20 @@ def process_multiple_images(image_paths: List[str]) -> dict:
         if res.get("success"):
             overall_quality_scores.append(res["quality"]["overall_score"])
             all_quality_issues.extend(res["quality"].get("issues", []))
+            for bc in res.get("barcodes", []):
+                bc_item = dict(bc)
+                bc_item["source_image_index"] = idx
+                bc_item["source_image_number"] = image_number
+                all_barcodes.append(bc_item)
+            
+            if res.get("languages", {}).get("detected_languages"):
+                detected_languages_all.update(res["languages"]["detected_languages"])
+            
+            if res.get("anomaly_detection", {}).get("findings"):
+                for finding in res["anomaly_detection"]["findings"]:
+                    f_item = dict(finding)
+                    f_item["image_number"] = image_number
+                    all_anomalies.append(f_item)
 
     per_field_candidates: Dict[str, list] = {k: [] for k in _empty_fields().keys()}
     for res in per_image_results:
@@ -825,11 +1009,27 @@ def process_multiple_images(image_paths: List[str]) -> dict:
     avg_quality = sum(overall_quality_scores) / len(overall_quality_scores) if overall_quality_scores else 0.8
     successful_images = sum(1 for r in per_image_results if r.get("success"))
 
+    has_tampering = any(a.get("type") == "MRP_STICKER_OVERLAY" for a in all_anomalies)
+
     return {
         "success": True,
         "total_images": len(image_paths),
         "successful_images": successful_images,
         "fields": fused_fields,
+        "barcodes": all_barcodes,
+        "languages": {
+            "detected_languages": list(detected_languages_all) if detected_languages_all else ["en"],
+            "has_english": "en" in detected_languages_all or not detected_languages_all,
+            "has_hindi": "hi" in detected_languages_all,
+            "is_dual_language": "en" in detected_languages_all and "hi" in detected_languages_all
+        },
+        "anomaly_detection": {
+            "has_anomaly": len(all_anomalies) > 0,
+            "tampering_detected": has_tampering,
+            "tampering_risk": "CRITICAL" if has_tampering else ("HIGH" if len(all_anomalies) > 1 else ("MEDIUM" if len(all_anomalies) == 1 else "LOW")),
+            "findings": all_anomalies
+        },
+        "forensics": per_image_results[0].get("forensics", {}) if per_image_results else {},
         "quality": {
             "overall_score": round(avg_quality, 2),
             "issues": list(set(all_quality_issues)),
