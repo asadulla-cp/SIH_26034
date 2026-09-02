@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
-from .config import MAX_IMAGE_PX, MAX_UPLOAD_MB, UPLOAD_DIR
+from ..config import MAX_IMAGE_PX, MAX_UPLOAD_MB, UPLOAD_DIR
 
 
 class ImageError(ValueError):
