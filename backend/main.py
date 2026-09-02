@@ -142,18 +142,7 @@ async def lifespan(app: FastAPI):
     init_db()
     get_rule_engine()
     logger.info("✅ Database & Rule Engine initialized")
-
-    # Pre-warm EasyOCR — downloads models before first request so scans
-    # don't hit Render's 30s timeout during model download on cold start.
-    try:
-        logger.info("⏳ Pre-warming EasyOCR (may take 1-2 min on first deploy)...")
-        import asyncio
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _prewarm_ocr)
-        logger.info("✅ EasyOCR ready — all models cached")
-    except Exception as e:
-        logger.warning(f"EasyOCR pre-warm skipped, will load on first request: {e}")
-
+    # NOTE: EasyOCR models load lazily on first scan request (saves startup RAM on Render free tier)
     yield
     logger.info("MetaLex shutting down")
 
