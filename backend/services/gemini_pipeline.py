@@ -57,6 +57,10 @@ FIELD EXTRACTION RULES (follow strictly):
 • customer_care → Consumer helpline. Look for "Consumer Care", "Customer Care",
                   "Helpline", "Toll Free", "Contact Us" with phone number or email.
 
+• barcode       → The numeric barcode number printed below the barcode stripes or QR code.
+                  Usually EAN-13 (13 digits), UPC-A (12 digits), or Code-128.
+                  Read the digits directly — do NOT scan the barcode, just read the printed number.
+
 CONFIDENCE SCORING:
   1.0  → Text is fully visible, unambiguous, clearly labelled
   0.7–0.9 → Text is readable but slightly unclear (minor blur/angle)
@@ -84,7 +88,8 @@ Do not guess or fabricate values. Return ONLY the JSON object, no explanation.
   "use_by_date":         {"value": "...", "confidence": 0.0},
   "manufacturer":        {"value": "...", "confidence": 0.0},
   "country_of_origin":   {"value": "...", "confidence": 0.0},
-  "customer_care":       {"value": "...", "confidence": 0.0}
+  "customer_care":       {"value": "...", "confidence": 0.0},
+  "barcode":             {"value": "...", "confidence": 0.0}
 }"""
 
 FIELD_LABELS = {
@@ -96,6 +101,7 @@ FIELD_LABELS = {
     "manufacturer": "Manufacturer/Packer",
     "country_of_origin": "Country of Origin",
     "customer_care": "Customer Care",
+    "barcode": "Barcode Number (EAN-13/UPC/Code-128)",
 }
 
 ALL_FIELDS = list(FIELD_LABELS.keys())
