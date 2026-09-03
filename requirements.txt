@@ -1,6 +1,6 @@
-# MetaLex Backend Dependencies
-# NOTE: torch and torchvision are installed automatically by easyocr.
-# Do NOT add them here — they are 800MB+ and will exceed Render free tier build time.
+# MetaLex Backend Dependencies for Render deployment
+# easyocr and torch (~800MB) are excluded — Gemini handles OCR in production.
+# EasyOCR is used as local fallback only when GEMINI_API_KEY is not set.
 
 # Web framework
 fastapi==0.141.1
@@ -16,9 +16,8 @@ passlib[bcrypt]==1.7.4
 python-jose[cryptography]==3.3.0
 email-validator==2.3.0
 
-# AI / Vision
+# AI / Vision (lightweight — no torch/easyocr)
 google-generativeai==0.8.6
-easyocr==1.7.2
 opencv-python-headless==4.10.0.84
 pillow==12.3.0
 numpy==1.26.4

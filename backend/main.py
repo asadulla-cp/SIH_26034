@@ -19,7 +19,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 import numpy as np
 from PIL import Image
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query, status
@@ -119,7 +122,11 @@ FIELD_LABELS = {
 
 def _prewarm_ocr():
     """Download and cache EasyOCR models synchronously during startup."""
-    import easyocr
+    try:
+        import easyocr
+    except ImportError:
+        logger.info("EasyOCR not installed — skipping OCR pre-warm (Gemini will handle extraction)")
+        return
     import ssl
     try:
         ssl._create_default_https_context = ssl._create_unverified_context

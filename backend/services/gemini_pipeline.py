@@ -12,7 +12,10 @@ import re
 import json
 import logging
 from typing import Optional
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 import PIL.Image
 from dotenv import load_dotenv
 

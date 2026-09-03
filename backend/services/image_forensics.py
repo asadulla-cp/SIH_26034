@@ -4,7 +4,10 @@ Detects digital manipulation, copy-paste splice artifacts, and re-compression an
 """
 import io
 import os
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 import numpy as np
 from PIL import Image, ImageChops, ImageEnhance
 from typing import Dict, Any, List, Optional

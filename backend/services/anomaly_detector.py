@@ -3,7 +3,10 @@ MetaLex AI Anomaly Detection Service
 Detects MRP tampering, sticker overlays, overwritten date fields, and physical label damage
 using computer vision techniques (edge gradients, color histogram comparison, contour analysis).
 """
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 import logging
