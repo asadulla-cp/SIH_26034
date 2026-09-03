@@ -211,7 +211,13 @@ def process_with_gemini(file_paths: list[str]) -> dict:
     import requests
 
     api_key = _get_api_key()
-    url = f"https://generativelanguage.googleapis.com/v1alpha/models/{MODEL_ID}:generateContent?key={api_key}"
+
+    # Fallback chain: if primary model is rate-limited or unavailable, try next
+    _MODEL_CHAIN = [
+        ("gemini-3.6-flash", "v1alpha"),
+        ("gemini-3.5-flash", "v1alpha"),
+        ("gemini-3.1-flash-lite", "v1beta"),
+    ]
 
     # ── Load and encode all images ───────────────────────────────────────────
     quality_scores = []
@@ -255,18 +261,43 @@ def process_with_gemini(file_paths: list[str]) -> dict:
         },
     }
 
-    # ── Call Gemini REST API ─────────────────────────────────────────────────
-    logger.info(f"Calling {MODEL_ID} REST API with {len(image_parts)} image(s)...")
-    try:
-        resp = requests.post(url, json=payload, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as api_err:
-        logger.error(f"Gemini API error: {api_err}")
-        raise RuntimeError(f"Gemini extraction failed: {api_err}") from api_err
+    # ── Call Gemini REST API with fallback ───────────────────────────────────
+    raw_text = None
+    used_model = MODEL_ID
+    last_err = None
 
-    logger.info(f"Gemini response (first 600 chars): {raw_text[:600]}")
+    for _model, _api_ver in _MODEL_CHAIN:
+        _url = f"https://generativelanguage.googleapis.com/{_api_ver}/models/{_model}:generateContent?key={api_key}"
+        logger.info(f"Trying {_model} ({_api_ver}) with {len(image_parts)} image(s)...")
+        try:
+            resp = requests.post(_url, json=payload, timeout=60)
+            if resp.status_code in (429, 503, 529):
+                logger.warning(f"{_model} returned {resp.status_code}, trying next model...")
+                last_err = f"HTTP {resp.status_code} from {_model}"
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            if "candidates" not in data:
+                logger.warning(f"{_model} response has no candidates: {str(data)[:200]}")
+                last_err = f"No candidates from {_model}"
+                continue
+            parts = data["candidates"][0]["content"].get("parts", [])
+            if not parts:
+                last_err = f"Empty parts from {_model}"
+                continue
+            raw_text = parts[0].get("text", "")
+            used_model = _model
+            logger.info(f"✅ {_model} responded successfully.")
+            break
+        except Exception as e:
+            logger.warning(f"{_model} failed: {e}")
+            last_err = str(e)
+            continue
+
+    if raw_text is None:
+        raise RuntimeError(f"All Gemini models failed. Last error: {last_err}")
+
+    logger.info(f"Gemini response from {used_model} (first 300 chars): {raw_text[:300]}")
     extracted = _safe_extract_json(raw_text)
 
     # ── Get EasyOCR results for bounding-box UI overlay ─────────────────────
@@ -366,5 +397,5 @@ def process_with_gemini(file_paths: list[str]) -> dict:
         "has_conflicts": False,
         "conflict_fields": [],
         "quality": overall_quality,
-        "ocr_engine": f"gemini_{MODEL_ID}",
+        "ocr_engine": f"gemini_{used_model}",
     }
