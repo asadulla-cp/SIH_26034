@@ -73,7 +73,7 @@ if os.environ.get("GEMINI_API_KEY") and os.environ.get("GEMINI_API_KEY") != "you
     try:
         from backend.services.gemini_pipeline import process_with_gemini
         _gemini_pipeline = process_with_gemini
-        logging.getLogger("metalex").info("✅ Gemini 3.6 Flash pipeline activated.")
+        logging.getLogger("metalex").info("✅ Gemini 2.5 Flash pipeline activated.")
     except Exception as _ge:
         logging.getLogger("metalex").warning(f"Gemini pipeline failed to load: {_ge}")
 
