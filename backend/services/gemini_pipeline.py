@@ -271,7 +271,6 @@ def process_with_gemini(file_paths: list[str]) -> dict:
 
     # ── Get EasyOCR results for bounding-box UI overlay ─────────────────────
     ocr_results = []
-    img0 = None
     try:
         from backend.services.ocr_pipeline import run_ocr
         img0 = cv2.imread(file_paths[0])
@@ -279,67 +278,6 @@ def process_with_gemini(file_paths: list[str]) -> dict:
             ocr_results = run_ocr(img0)
     except Exception as e:
         logger.warning(f"OCR bbox extraction skipped: {e}")
-
-    # ── Run barcode/QR detection on all images ───────────────────────────────
-    all_barcodes = []
-    try:
-        from backend.services.barcode_detector import detect_barcodes
-        seen_codes: set = set()
-        for idx, fp in enumerate(file_paths):
-            try:
-                img = cv2.imread(fp) if idx > 0 else img0
-                if img is None:
-                    continue
-                barcodes_in_image = detect_barcodes(img)
-                for bc in barcodes_in_image:
-                    if bc.get("data") and bc["data"] not in seen_codes:
-                        seen_codes.add(bc["data"])
-                        bc["source_image_index"] = idx
-                        bc["source_image_number"] = idx + 1
-                        all_barcodes.append(bc)
-            except Exception as _be:
-                logger.debug(f"Barcode detection failed for image {fp}: {_be}")
-    except Exception as e:
-        logger.warning(f"Barcode detection skipped: {e}")
-
-    # ── Run anomaly detection on first image ──────────────────────────────────
-    anomaly_data: dict = {
-        "has_anomaly": False,
-        "tampering_detected": False,
-        "tampering_risk": "LOW",
-        "findings": [],
-    }
-    try:
-        from backend.services.anomaly_detector import run_full_anomaly_detection
-        _check_img = cv2.imread(file_paths[0]) if img0 is None else img0
-        if _check_img is not None:
-            anomaly_data = run_full_anomaly_detection(_check_img, [])
-    except Exception as e:
-        logger.debug(f"Anomaly detection skipped: {e}")
-
-    # ── Run image forensics on first image ───────────────────────────────────
-    forensics_data: dict = {"verdict": "UNKNOWN", "authenticity_score": 0.5, "findings": []}
-    try:
-        from backend.services.image_forensics import analyze_image_authenticity
-        _forensics_img = cv2.imread(file_paths[0]) if img0 is None else img0
-        if _forensics_img is not None:
-            forensics_data = analyze_image_authenticity(_forensics_img, file_path=file_paths[0])
-    except Exception as e:
-        logger.debug(f"Forensics skipped: {e}")
-
-    # ── Detect text languages via EasyOCR results ─────────────────────────────
-    lang_data: dict = {
-        "detected_languages": ["en"],
-        "has_english": True,
-        "has_hindi": False,
-        "is_dual_language": False,
-    }
-    try:
-        from backend.services.ocr_pipeline import detect_text_languages
-        if ocr_results:
-            lang_data = detect_text_languages(ocr_results)
-    except Exception as e:
-        logger.debug(f"Language detection skipped: {e}")
 
     # ── Remap Gemini field names → rule engine field names ───────────────────
     FIELD_REMAP = {
@@ -420,10 +358,7 @@ def process_with_gemini(file_paths: list[str]) -> dict:
         "issues": list(set(quality_issues)),
     }
 
-    logger.info(
-        f"Gemini extraction complete. Fields detected: {detected_fields}. "
-        f"Barcodes found: {len(all_barcodes)}"
-    )
+    logger.info(f"Gemini extraction complete. Fields detected: {detected_fields}")
 
     return {
         "fields": fused_fields,
@@ -432,9 +367,4 @@ def process_with_gemini(file_paths: list[str]) -> dict:
         "conflict_fields": [],
         "quality": overall_quality,
         "ocr_engine": f"gemini_{MODEL_ID}",
-        # ── Phase-2 data (now included for Gemini path) ──────────────────────
-        "barcodes": all_barcodes,
-        "languages": lang_data,
-        "anomaly_detection": anomaly_data,
-        "forensics": forensics_data,
     }

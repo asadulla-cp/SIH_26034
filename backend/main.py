@@ -408,27 +408,6 @@ async def scan_product(
         lang_data = multi_result.get("languages", {})
         anomaly_data = multi_result.get("anomaly_detection", {})
 
-        # ── Barcode fallback: use Gemini text-read barcode digits when image ──
-        # ── scanner (pyzbar/OpenCV) found nothing (e.g. blurry barcode area) ─
-        if not barcodes:
-            gemini_bc_field = fused_fields.get("barcode", {})
-            gemini_bc_val = gemini_bc_field.get("value")
-            if gemini_bc_val:
-                # Sanitise to digits only for numeric barcodes
-                import re as _re
-                clean_bc = _re.sub(r"[^0-9A-Za-z\-]", "", str(gemini_bc_val)).strip()
-                if clean_bc:
-                    logger.info(f"Image barcode scan found nothing; using Gemini text-extracted barcode: {clean_bc}")
-                    barcodes = [{
-                        "type": "TEXT_READ",
-                        "data": clean_bc,
-                        "bbox": gemini_bc_field.get("bounding_box"),
-                        "confidence": gemini_bc_field.get("confidence", 0.7),
-                        "detector": "gemini_text",
-                        "source_image_index": 0,
-                        "source_image_number": 1,
-                    }]
-
         # ── Barcode & GS1 Cross-Verification ─────────────────────────────────
         barcode_summary = None
         barcode_info_for_engine = {"detected": False}
@@ -462,10 +441,9 @@ async def scan_product(
         # Inject barcode pseudo-field into rule engine
         fields_for_engine["barcode"] = {
             "value": barcodes[0]["data"] if barcodes else None,
-            "confidence": barcodes[0].get("confidence", 1.0) if barcodes else 0.0,
+            "confidence": 1.0 if barcodes else 0.0,
             "barcode_info": barcode_info_for_engine,
-            "bounding_box": barcodes[0].get("bbox") if barcodes else None,
-            "detector": barcodes[0].get("detector") if barcodes else None,
+            "bounding_box": barcodes[0].get("bbox") if barcodes else None
         }
 
         # Inject language & anomaly pseudo-fields into rule engine

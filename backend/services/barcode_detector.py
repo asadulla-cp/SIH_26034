@@ -166,14 +166,10 @@ def verify_against_gs1(
         return {
             "barcode": clean_code,
             "gs1_found": False,
-            "is_valid": None,           # None = cannot determine (not a confirmed fail)
-            "status": "NEEDS_REVIEW",
-            "message": (
-                f"Barcode {clean_code} is not in the local GS1 reference database. "
-                f"The product may be registered in the national GS1 India registry. "
-                f"Officer should manually verify via gs1india.org if needed."
-            ),
-            "mismatches": [],
+            "is_valid": False,
+            "status": "FAIL",
+            "message": f"Barcode {clean_code} not found in GS1 National Database — Possible counterfeit or unregistered commodity.",
+            "mismatches": ["Unregistered barcode in GS1 database"],
             "gs1_record": None,
         }
 
