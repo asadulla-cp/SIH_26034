@@ -579,7 +579,6 @@ async def scan_product(
 
         # ── Save violations ────────────────────────────────────────────────────
         violation_list = []
-        violation_status_map: dict[str, str] = {}  # viol.id → "FAIL" | "NEEDS_REVIEW"
         all_issues = validation.get("violations", []) + validation.get("reviews", [])
         for v in all_issues:
             if v["status"] == "PASS":
@@ -590,7 +589,6 @@ async def scan_product(
                 field=v["field"],
                 severity=v.get("severity_level", v.get("severity", "high")),
                 severity_points=v.get("severity_points", 5),
-                status=v["status"],
                 title=v["rule_title"],
                 detected_value=v.get("detected_value"),
                 expected_requirement=v.get("expected_requirement"),
@@ -602,7 +600,6 @@ async def scan_product(
                 is_prototype_rule=v.get("is_prototype_rule", True),
             )
             db.add(viol)
-            violation_status_map[viol.id] = v["status"]
             violation_list.append(viol)
 
         db.commit()
@@ -699,7 +696,6 @@ async def scan_product(
                     "field": v.field,
                     "severity": v.severity,
                     "severity_points": v.severity_points,
-                    "status": violation_status_map.get(v.id, "FAIL"),
                     "title": v.title,
                     "detected_value": v.detected_value,
                     "expected_requirement": v.expected_requirement,
@@ -864,7 +860,6 @@ async def get_inspection(inspection_id: str, db: Session = Depends(get_db)):
                     "field": v.field,
                     "severity": v.severity,
                     "severity_points": v.severity_points or 5,
-                    "status": v.status or "FAIL",
                     "title": v.title,
                     "detected_value": v.detected_value,
                     "expected_requirement": v.expected_requirement,

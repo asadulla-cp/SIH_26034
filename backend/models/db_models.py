@@ -106,7 +106,6 @@ class Violation(Base):
     field = Column(String, nullable=False)
     severity = Column(String, default="high")  # high / medium / low / critical
     severity_points = Column(Integer, default=5)  # 2, 5, 7, 10
-    status = Column(String, default="FAIL")  # FAIL / NEEDS_REVIEW
     title = Column(String, nullable=False)
     detected_value = Column(Text, nullable=True)
     expected_requirement = Column(Text, nullable=True)

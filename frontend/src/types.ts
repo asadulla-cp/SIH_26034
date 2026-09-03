@@ -20,7 +20,6 @@ export interface Violation {
   field: string;
   severity: 'critical' | 'high' | 'medium' | 'low';
   severity_points?: number;
-  status?: 'FAIL' | 'NEEDS_REVIEW' | 'PASS';
   title: string;
   detected_value: string | null;
   expected_requirement: string | null;
@@ -35,8 +34,8 @@ export interface Violation {
 export interface BarcodeResult {
   barcode: string;
   gs1_found: boolean;
-  is_valid: boolean | null;
-  status: 'PASS' | 'FAIL' | 'NEEDS_REVIEW';
+  is_valid: boolean;
+  status: 'PASS' | 'FAIL';
   gs1_product_name?: string;
   gs1_manufacturer?: string;
   gs1_category?: string;
