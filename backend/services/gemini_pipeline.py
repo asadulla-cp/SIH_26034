@@ -1,6 +1,6 @@
 """
 MetaLex — Gemini 2.5 Flash Extraction Pipeline
-Uses Google Gemini 2.5 Flash multimodal capabilities with:
+Uses Google Gemini 3.6 Flash multimodal capabilities with:
   - Native structured JSON schema output (no regex parsing needed)
   - System instruction for Legal Metrology officer persona
   - Cross-image reasoning across all uploaded angles
@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger("metalex.gemini")
 
-MODEL_ID = "gemini-2.5-flash"
+MODEL_ID = "gemini-3.6-flash"
 
 SYSTEM_INSTRUCTION = """You are a certified Legal Metrology Inspector trained under the
 Legal Metrology (Packaged Commodities) Rules, 2011 (India).
@@ -211,7 +211,7 @@ def process_with_gemini(file_paths: list[str]) -> dict:
     import requests
 
     api_key = _get_api_key()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1alpha/models/{MODEL_ID}:generateContent?key={api_key}"
 
     # ── Load and encode all images ───────────────────────────────────────────
     quality_scores = []
