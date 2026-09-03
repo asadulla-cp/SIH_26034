@@ -733,8 +733,12 @@ class RuleEngine:
 
         barcode_number = bc_info.get("barcode", "Unknown")
         if not bc_info.get("gs1_found"):
-            result["status"] = "FAIL"
-            result["reason"] = f"Barcode {barcode_number} not found in GS1 National Database — Possible counterfeit or unregistered commodity."
+            result["status"] = "NEEDS_REVIEW"
+            result["reason"] = (
+                f"Barcode {barcode_number} is not in the local GS1 reference database. "
+                f"This does not mean the product is unregistered — the national GS1 India "
+                f"registry may have a record. Officer may verify at gs1india.org."
+            )
             return
 
         mismatches = bc_info.get("mismatches", [])
