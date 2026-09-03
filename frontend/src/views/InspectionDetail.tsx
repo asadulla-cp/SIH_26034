@@ -100,12 +100,21 @@ export const InspectionDetail: React.FC = () => {
 
   // Group and sort violations by severity points
   const sortedViolations: Violation[] = [...(inspection.violations || [])].sort((a, b) => {
+    // NEEDS_REVIEW sorts after FAIL
+    const statusWeight = (v: Violation) => v.status === 'NEEDS_REVIEW' ? 0 : 1;
+    const weightDiff = statusWeight(b) - statusWeight(a);
+    if (weightDiff !== 0) return weightDiff;
     const ptsA = a.severity_points ?? (a.severity === 'critical' ? 10 : (a.severity === 'high' ? 7 : (a.severity === 'medium' ? 5 : 2)));
     const ptsB = b.severity_points ?? (b.severity === 'critical' ? 10 : (b.severity === 'high' ? 7 : (b.severity === 'medium' ? 5 : 2)));
     return ptsB - ptsA;
   });
 
   const getSeverityBadge = (v: Violation) => {
+    // NEEDS_REVIEW items always get a neutral yellow "review" badge regardless of severity
+    if (v.status === 'NEEDS_REVIEW') {
+      return <span style={{ background: 'rgba(99,102,241,0.15)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.3)', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>🔵 NEEDS REVIEW</span>;
+    }
+
     const pts = v.severity_points ?? (v.severity === 'critical' ? 10 : (v.severity === 'high' ? 7 : (v.severity === 'medium' ? 5 : 2)));
     const sev = v.severity.toLowerCase();
 
@@ -226,7 +235,13 @@ export const InspectionDetail: React.FC = () => {
 
           {/* Barcode & GS1 Verification Card */}
           {inspection.barcode_data && (
-            <div className="card" style={{ marginTop: '16px', borderLeft: `4px solid ${inspection.barcode_data.is_valid ? 'var(--status-pass)' : 'var(--status-fail)'}` }}>
+            <div className="card" style={{ marginTop: '16px', borderLeft: `4px solid ${
+            inspection.barcode_data.is_valid === true
+              ? 'var(--status-pass)'
+              : inspection.barcode_data.is_valid === false && inspection.barcode_data.gs1_found
+              ? 'var(--status-fail)'
+              : '#eab308'   // yellow = cannot verify (not in local DB)
+          }` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <QrCode size={18} color="var(--accent-primary)" />
@@ -238,9 +253,13 @@ export const InspectionDetail: React.FC = () => {
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981', fontSize: '12px', fontWeight: 600 }}>
                     <ShieldCheck size={14} /> Registered in GS1
                   </span>
-                ) : (
+                ) : inspection.barcode_data.mismatches && inspection.barcode_data.mismatches.length > 0 ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#ef4444', fontSize: '12px', fontWeight: 600 }}>
-                    <ShieldAlert size={14} /> Unregistered / Counterfeit Alert
+                    <ShieldAlert size={14} /> GS1 Mismatch
+                  </span>
+                ) : (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#eab308', fontSize: '12px', fontWeight: 600 }}>
+                    <ShieldAlert size={14} /> Cannot Verify (not in local DB)
                   </span>
                 )}
               </div>
@@ -451,18 +470,42 @@ export const InspectionDetail: React.FC = () => {
           {/* Violations by Severity */}
           {sortedViolations && sortedViolations.length > 0 && (
             <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--status-fail)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <AlertTriangle size={16} /> Violations by Severity ({sortedViolations.length})
-                </h3>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Sorted by Risk Priority
-                </span>
-              </div>
+              {(() => {
+                const failCount = sortedViolations.filter(v => v.status !== 'NEEDS_REVIEW').length;
+                const reviewCount = sortedViolations.filter(v => v.status === 'NEEDS_REVIEW').length;
+                return (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '6px', color: failCount > 0 ? 'var(--status-fail)' : '#6366f1' }}>
+                      <AlertTriangle size={16} />
+                      {failCount > 0 ? `Violations (${failCount})` : 'Review Items'}
+                      {reviewCount > 0 && failCount > 0 && (
+                        <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 600 }}>
+                          + {reviewCount} needs review
+                        </span>
+                      )}
+                      {reviewCount > 0 && failCount === 0 && (
+                        <span style={{ fontSize: '13px', color: '#6366f1', fontWeight: 600 }}>
+                          ({reviewCount})
+                        </span>
+                      )}
+                    </h3>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Sorted by Risk Priority
+                    </span>
+                  </div>
+                );
+              })()}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {sortedViolations.map((v, i) => (
-                  <div key={i} className={`violation-card ${v.severity.toLowerCase()}`}>
+                  <div
+                    key={i}
+                    className={`violation-card ${v.status === 'NEEDS_REVIEW' ? 'needs-review' : v.severity.toLowerCase()}`}
+                    style={v.status === 'NEEDS_REVIEW' ? {
+                      borderLeft: '4px solid #6366f1',
+                      background: 'rgba(99,102,241,0.05)',
+                    } : undefined}
+                  >
                     <div className="violation-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {getSeverityBadge(v)}
